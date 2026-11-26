@@ -36,6 +36,8 @@ Security: the agent binds `127.0.0.1` by default; the Quest reaches it as `http:
 | `scroll` | `dx, dy` | Pixels. Content delta: `dy > 0` moves content down (touch-drag direction). |
 | `magnify` | `delta` | Natural-log zoom ratio; `> 0` zooms in. |
 | `swipe` | `direction: "left"\|"right"\|"up"\|"down"` | Three-finger swipe. |
+| `key` | `code, down, modifiers?: ("cmd"\|"ctrl"\|"alt"\|"shift")[]` | Physical key by DOM `KeyboardEvent.code` (`KeyA`, `Digit1`, `Enter`, `Backspace`, `ArrowLeft`, `F1`, ...), mapped on the Mac to a virtual key code and posted as a CGEvent keyboard event with the given modifier flags. A lone modifier key (`MetaLeft`, `ControlLeft`, `AltLeft`, `ShiftLeft`) posts a flags-changed press. |
+| `text` | `text` | Insert this string (CGEvent keyboard event with a Unicode string; works whatever input source the Mac has active). Used for Ukrainian letters and accepted suggestions. |
 
 ## Gesture map
 
@@ -51,6 +53,23 @@ Security: the agent binds `127.0.0.1` by default; the Quest reaches it as `http:
 | Both hands pinching | two-hand grab | squeeze (one or both) | moves, turns and resizes the panel (hands apart = bigger); no Mac event |
 | none | menu | B / Y button | Mission Control |
 
+## Virtual keyboard
+
+The main typing path. The real Bluetooth keyboard still works unchanged and is an option.
+
+- Surface mode: a ten-finger keyboard laid on the physical desk. Plane from WebXR `plane-detection` or `hit-test` when the browser grants it,
+  else calibrated by laying a flat hand on the desk (palm height becomes the plane). The desk gives touch feedback, which is what allows fast typing.
+- Poke mode: the same keyboard floating in mid air, for when there is no surface; a deeper, slower press (fingertip crossing the plane).
+- Press detection (pure TypeScript, per fingertip, 10 fingers): a press is a downward fingertip speed peak that ends at the plane
+  (height under contact height) and reverses or stops; the key is the one under the fingertip at the moment of contact.
+  A finger resting on the plane (low speed, no recent downward peak) never presses. Two fingers pressing at once give two keys. Thumbs press Space.
+  Press feedback: key highlight and a short click sound (WebAudio).
+- Layouts: US English and Ukrainian (ЙЦУКЕН), switched by the globe key on the keyboard or a left-hand tap on the keyboard's left edge. Modifiers Cmd, Ctrl, Opt, Shift are sticky (one tap arms for the next key, double tap locks) so Cmd-shortcuts work.
+- Sending: letters in English go as `key`; Ukrainian letters go as `text` (independent of the Mac input source); with Cmd or Ctrl armed the physical key goes as `key` with modifiers.
+  Backspace, Enter, Tab, Escape, arrows always go as `key`.
+- Speed aids: a local suggestion strip (small word list per language, frequency ranked) and autocorrect that snaps an edge press to the likely key
+  using a key-press probability model (Gaussian over key centres, ranked with the word list prefix). Swipe a fingertip across the strip, or tap a suggestion, to accept; acceptance sends `text` for the rest of the word. No cloud.
+
 ## Acceptance checks (machine-run)
 
 | # | Check | Command |
@@ -58,13 +77,16 @@ Security: the agent binds `127.0.0.1` by default; the Quest reaches it as `http:
 | A1 | Classifier: click, double click, drag, right click, scroll, magnify, three-finger swipe (4 directions), two-hand grab, controller trigger/squeeze/stick, each from synthetic joint fixtures, plus negative cases | `cd web && npm test` |
 | A2 | Panel geometry: ray to panel UV for flat and curved panels | `cd web && npm test` |
 | A3 | Protocol: message encode/validate, video frame parse | `cd web && npm test` |
+| A9 | Press detection on synthetic fingertip trajectories: tap counts, resting finger does not, two fingers give two keys, thumbs give space, poke mode | `cd web && npm test` |
+| A10 | Autocorrect: an edge press maps to the intended key in common EN and UK words; suggestions | `cd web && npm test` |
+| A11 | Key mapping: DOM key code to CGEvent key code and modifier flags, `text` and `key` message to poster calls | `cd agent && swift test` |
 | A4 | Agent event mapping: each message to the exact poster call sequence with a fake `EventPoster` | `cd agent && swift test` |
 | A5 | Agent framing: HTTP request parse, WebSocket handshake and frame codec, token check | `cd agent && swift test` |
 | A6 | Agent builds release | `cd agent && swift build -c release` |
 | A7 | Headless: page loads, Enter AR requests `immersive-ar` with `hand-tracking` (emulated `navigator.xr`) | `cd web && npm run e2e` |
 | A8 | Web type check and production build | `cd web && npm run check && npm run build` |
 
-CI runs A1-A3, A7, A8 on ubuntu and A4-A6 on macos-latest.
+CI runs A1-A3, A7-A10 (web) on ubuntu and A4-A6, A11 on macos-latest.
 
 ## Out of scope for v0.1
 

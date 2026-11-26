@@ -38,3 +38,13 @@ A random token printed by `handdesk start` and stored mode 0600 gates `/ws`; the
 
 ## D10 Thresholds are starting values
 Pinch 25 mm on, 40 mm off; swipe 100 mm in 500 ms; click under 600 ms and 15 mm of travel. They come from typical hand sizes, not measurements on Yehor's hands; on-headset tuning is open.
+
+## D11 Virtual keyboard is the main typing path (new requirement, 2026-11-26)
+Surface keyboard on the physical desk, because touching a real surface is what makes ten-finger typing fast; mid-air poke is the fallback. Press = downward speed peak ending at the plane, never plain collision, so resting fingers never type.
+Plane source order: WebXR plane detection, hit-test, then flat-hand calibration (palm height). The first two are optional features and not guaranteed on Quest Browser, so calibration is the dependable one.
+
+## D12 Ukrainian typed as Unicode text, English as physical keys
+Letters sent as `text` work whatever input source the Mac has active, so the headset layout and the Mac cannot disagree. Shortcuts (Cmd/Ctrl held) must be physical keys, so they go as `key` with the Latin position of the key. Switching layout on the headset never touches the Mac's input source.
+
+## D13 Autocorrect: Gaussian key-press model plus word-list prefix
+Each press scores all keys by a Gaussian around the key centre (sigma about 0.45 key width, a starting value) times a prior from the word list's prefix probabilities; the best key wins only when the press is outside the key's inner 60% (edge press), so deliberate presses are never overridden. Word lists are small bundled frequency lists (a starting vocabulary, not a full dictionary).
