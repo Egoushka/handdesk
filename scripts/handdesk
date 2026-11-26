@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# One command on the Mac, from a checkout: builds what is missing, then runs the agent.
+#   scripts/handdesk start            (extra flags go to `handdesk start`)
+#   scripts/handdesk launchagent install
+set -euo pipefail
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+if [ ! -f "$root/web/dist/index.html" ]; then
+  (cd "$root/web" && npm ci && npm run build)
+fi
+(cd "$root/agent" && swift build -c release >/dev/null)
+bin="$root/agent/.build/release/handdesk"
+if [ "${1:-}" = "start" ]; then
+  shift
+  exec "$bin" start "$@" --web "$root/web/dist"
+fi
+exec "$bin" "$@"

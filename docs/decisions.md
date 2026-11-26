@@ -48,3 +48,6 @@ Letters sent as `text` work whatever input source the Mac has active, so the hea
 
 ## D13 Autocorrect: Gaussian key-press model plus word-list prefix
 Each press scores all keys by a Gaussian around the key centre (sigma about 0.45 key width, a starting value) times a prior from the word list's prefix probabilities; the best key wins only when the press is outside the key's inner 60% (edge press), so deliberate presses are never overridden. Word lists are small bundled frequency lists (a starting vocabulary, not a full dictionary).
+
+## D14 Agent tests are an executable, `swift run core-tests`
+The Mac has only the Command Line Tools: no XCTest, and the Swift Testing macros fail to load. A small assertion harness in an executable target runs the same checks, exits 1 on a failure, and works on a stock runner too. Reverse if: a runner has full Xcode and `swift test` is wanted; the tests port over.

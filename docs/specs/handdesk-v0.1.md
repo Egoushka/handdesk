@@ -79,9 +79,9 @@ The main typing path. The real Bluetooth keyboard still works unchanged and is a
 | A3 | Protocol: message encode/validate, video frame parse | `cd web && npm test` |
 | A9 | Press detection on synthetic fingertip trajectories: tap counts, resting finger does not, two fingers give two keys, thumbs give space, poke mode | `cd web && npm test` |
 | A10 | Autocorrect: an edge press maps to the intended key in common EN and UK words; suggestions | `cd web && npm test` |
-| A11 | Key mapping: DOM key code to CGEvent key code and modifier flags, `text` and `key` message to poster calls | `cd agent && swift test` |
-| A4 | Agent event mapping: each message to the exact poster call sequence with a fake `EventPoster` | `cd agent && swift test` |
-| A5 | Agent framing: HTTP request parse, WebSocket handshake and frame codec, token check | `cd agent && swift test` |
+| A11 | Key mapping: DOM key code to CGEvent key code and modifier flags, `text` and `key` message to poster calls | `cd agent && swift run core-tests` |
+| A4 | Agent event mapping: each message to the exact poster call sequence with a fake `EventPoster` | `cd agent && swift run core-tests` |
+| A5 | Agent framing: HTTP request parse, WebSocket handshake and frame codec, token check | `cd agent && swift run core-tests` |
 | A6 | Agent builds release | `cd agent && swift build -c release` |
 | A7 | Headless: page loads, Enter AR requests `immersive-ar` with `hand-tracking` (emulated `navigator.xr`) | `cd web && npm run e2e` |
 | A8 | Web type check and production build | `cd web && npm run check && npm run build` |
