@@ -12,6 +12,8 @@ export function pairingToken(): string | undefined {
   const t = url.searchParams.get("t");
   if (t) {
     try { localStorage.setItem("handdesk.token", t); } catch { /* private mode */ }
+    url.searchParams.delete("t");
+    history.replaceState(null, "", url.pathname + url.search + url.hash);
     return t;
   }
   try { return localStorage.getItem("handdesk.token") ?? undefined; } catch { return undefined; }
@@ -82,7 +84,12 @@ export class Connection {
       if (!codec) return;
       const dec = new VideoDecoder({
         output: (frame) => { try { this.ev.onFrame(display, frame); } finally { frame.close(); } },
-        error: () => { this.decoders.delete(display); this.subscribe(this.wanted); },
+        error: () => {
+          const old = this.decoders.get(display);
+          this.decoders.delete(display);
+          try { old?.dec.close(); } catch { /* already closed */ }
+          this.subscribe(this.wanted);
+        },
       });
       dec.configure({ codec, optimizeForLatency: true, hardwareAcceleration: "prefer-hardware" });
       d = { dec, codec, gotKey: false };

@@ -4,8 +4,9 @@ import type { GestureEvent, HandFrame, Ray } from "../gesture/types";
 import { calibrateFromFlatHands, planeFromYaw, toPlane, type TypingPlane } from "../keyboard/plane";
 import { POKE, PressDetector, SURFACE, type FingerTip } from "../keyboard/press";
 import { TypingSession } from "../keyboard/session";
+import { StripSwipe } from "../keyboard/strip";
 import { applyGrab, pick, type Panel } from "../panel";
-import { gestureToMessages, keyActionToMessages } from "../protocol";
+import { gestureToMessages, keyActionToMessages, newMapperState } from "../protocol";
 import { Connection } from "./connection";
 import { dirToWorld, rayToWorld, readInput, startSession, type HeadFrame, type XRMode } from "./xr";
 import { KeyboardView, PanelView, ToolbarView, clickSound, makeEnvironment, makeTipDots } from "./world";
@@ -43,6 +44,7 @@ let plane: TypingPlane = planeFromYaw({ x: 0, y: 0.95, z: -0.5 }, 0);
 let keyboardView = new KeyboardView(session.keys);
 scene.add(keyboardView.mesh);
 const pressed = new Map<string, number>();
+const stripSwipe = new StripSwipe();
 let audio: AudioContext | undefined;
 let calibrating: { until: number; planes: TypingPlane[] } | undefined;
 let placed = false;
@@ -108,6 +110,7 @@ function toolbarAction(id: string, time: number): void {
 
 // ---- per frame ----
 const classifier = new GestureClassifier();
+const mapperState = newMapperState();
 let activePanel = 0;
 let grabStart: Panel | undefined;
 const TIPS = [["thumb", "thumb-tip"], ["index", "index-finger-tip"], ["middle", "middle-finger-tip"], ["ring", "ring-finger-tip"], ["pinky", "pinky-finger-tip"]] as const;
@@ -137,7 +140,7 @@ function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
     return;
   }
   if (ev.type === "grab-end") { grabStart = undefined; return; }
-  if ("ray" in ev) {
+  if ("ray" in ev && ev.type !== "drag-move" && ev.type !== "drag-end") {
     const ray = rayToWorld(ev.ray, head);
     const tb = pick(ray, [toolbar.panel]);
     if (tb && ev.type === "click" && ev.button === "left") {
@@ -149,7 +152,7 @@ function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
     const h = pick(ray, worldPanels());
     if (h && (ev.type === "point" || ev.type === "click" || ev.type === "drag-start")) activePanel = h.display;
   }
-  for (const m of gestureToMessages(ev, hitFn(head))) conn.send(m);
+  for (const m of gestureToMessages(ev, hitFn(head), mapperState)) conn.send(m);
 }
 
 function typing(hands: HandFrame[]): Set<string> {
@@ -171,6 +174,8 @@ function typing(hands: HandFrame[]): Set<string> {
 function handleKeyboard(world: HandFrame[], time: number): void {
   const tips = tipsOf(world);
   const rect = keyboardView.stripRect();
+  const swiped = stripSwipe.update(time, tips, rect);
+  if (swiped !== undefined) for (const a of session.accept(swiped)) for (const m of keyActionToMessages(a)) conn.send(m);
   for (const e of detector.update(time, tips)) {
     if (e.type !== "press") continue;
     if (e.v >= rect.v0 && e.v <= rect.v1 && Math.abs(e.u) <= keyboardView.width / 2) {

@@ -40,6 +40,7 @@ func parseStart(_ args: [String]) -> ServerConfig {
         switch args[i] {
         case "--port": guard let p = UInt16(value("--port")), p > 0 else { fail("bad --port") }; c.port = p
         case "--lan": c.lan = true
+        case "--host": c.host = value("--host")
         case "--tls-p12": c.p12Path = value("--tls-p12")
         case "--web": c.webRoot = value("--web")
         case "--magnify": guard let m = MagnifyMode(rawValue: value("--magnify")) else { fail("--magnify keys|gesture") }; c.magnifyMode = m
@@ -83,7 +84,7 @@ func command(_ cmd: String) -> Never {
         let extra = Array(CommandLine.arguments.dropFirst(3))
         let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/handdesk.log").path
         try? FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
-        do { try LaunchAgentPlist.make(programArguments: [exe, "start"] + extra, logPath: log).write(to: plist, atomically: true, encoding: .utf8) }
+        do { try LaunchAgentPlist.make(programArguments: LaunchAgentPlist.arguments(executable: exe, extra: extra, defaultWebRoot: defaultWebRoot()), logPath: log).write(to: plist, atomically: true, encoding: .utf8) }
         catch { fail("cannot write \(plist.path): \(error.localizedDescription)") }
         launchctl(["bootout", "\(domain)/\(label)"])
         launchctl(["bootstrap", domain, plist.path])
@@ -122,7 +123,7 @@ case "launchagent":
     command(args.dropFirst().first ?? "")
 default:
     print("""
-    handdesk start [--port 8787] [--lan --tls-p12 FILE] [--web DIR] [--magnify keys|gesture] [--invert-scroll]
+    handdesk start [--port 8787] [--lan --tls-p12 FILE --host NAME] [--web DIR] [--magnify keys|gesture] [--invert-scroll]
                    [--fps 60] [--bitrate 25000000] [--max-width 2560] [--no-adb]
     handdesk launchagent install [start options] | uninstall
     handdesk doctor

@@ -23,17 +23,17 @@ const UK: Record<string, string> = {
   KeyQ: "й", KeyW: "ц", KeyE: "у", KeyR: "к", KeyT: "е", KeyY: "н", KeyU: "г", KeyI: "ш", KeyO: "щ", KeyP: "з",
   BracketLeft: "х", BracketRight: "ї", KeyA: "ф", KeyS: "і", KeyD: "в", KeyF: "а", KeyG: "п", KeyH: "р", KeyJ: "о",
   KeyK: "л", KeyL: "д", Semicolon: "ж", Quote: "є", KeyZ: "я", KeyX: "ч", KeyC: "с", KeyV: "м", KeyB: "и", KeyN: "т",
-  KeyM: "ь", Comma: "б", Period: "ю", Backslash: "ґ",
+  KeyM: "ь", Comma: "б", Period: "ю", Backslash: "ґ", Slash: ".", Backquote: "'",
 };
 
 const EN_PUNCT: Record<string, string> = {
   BracketLeft: "[", BracketRight: "]", Semicolon: ";", Quote: "'", Comma: ",", Period: ".", Slash: "/", Backslash: "\\",
-  Minus: "-", Equal: "=",
+  Minus: "-", Equal: "=", Backquote: "`",
 };
 
 type Spec = [code: string, w?: number];
 const ROWS: Spec[][] = [
-  [["Escape"], ["Digit1"], ["Digit2"], ["Digit3"], ["Digit4"], ["Digit5"], ["Digit6"], ["Digit7"], ["Digit8"], ["Digit9"], ["Digit0"], ["Minus"], ["Equal"], ["Backspace", 2]],
+  [["Escape"], ["Backquote"], ["Digit1"], ["Digit2"], ["Digit3"], ["Digit4"], ["Digit5"], ["Digit6"], ["Digit7"], ["Digit8"], ["Digit9"], ["Digit0"], ["Minus"], ["Equal"], ["Backspace", 2]],
   [["Tab", 1.5], ["KeyQ"], ["KeyW"], ["KeyE"], ["KeyR"], ["KeyT"], ["KeyY"], ["KeyU"], ["KeyI"], ["KeyO"], ["KeyP"], ["BracketLeft"], ["BracketRight"], ["Backslash", 1.5]],
   [["Spacer", 1.75], ["KeyA"], ["KeyS"], ["KeyD"], ["KeyF"], ["KeyG"], ["KeyH"], ["KeyJ"], ["KeyK"], ["KeyL"], ["Semicolon"], ["Quote"], ["Enter", 2.25]],
   [["ShiftLeft", 2.25], ["KeyZ"], ["KeyX"], ["KeyC"], ["KeyV"], ["KeyB"], ["KeyN"], ["KeyM"], ["Comma"], ["Period"], ["Slash"], ["Globe", 1.5], ["ArrowUp"]],
@@ -87,4 +87,4 @@ export function buildLayout(lang: Lang): Key[] {
   return keys;
 }
 
-export const letterKeys = (lang: Lang): Key[] => buildLayout(lang).filter((k) => k.kind === "char");
+export const letterKeys = (lang: Lang): Key[] => buildLayout(lang).filter((k) => k.kind === "char" && /\p{L}/u.test(k.ch ?? ""));

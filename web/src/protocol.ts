@@ -64,16 +64,26 @@ export function keyActionToMessages(a: KeyAction): ClientMessage[] {
 
 export interface Cursor { display: number; x: number; y: number }
 
+/** Carries what a drag and a slow scroll need between events. */
+export interface MapperState {
+  /** last cursor while the left button is held; the release always goes there, even if the ray misses */
+  drag?: Cursor;
+  scrollX: number;
+  scrollY: number;
+}
+export const newMapperState = (): MapperState => ({ scrollX: 0, scrollY: 0 });
+
 /**
  * Turns gesture events into agent messages. `hit` resolves a ray to a display position (the page uses the panel
  * picker). Clicks press and release in place; drags press at the pinch-onset ray and follow the hand.
  */
-export function gestureToMessages(ev: GestureEvent, hit: (ray: Ray) => Cursor | undefined): ClientMessage[] {
+export function gestureToMessages(ev: GestureEvent, hit: (ray: Ray) => Cursor | undefined, state: MapperState = newMapperState()): ClientMessage[] {
   const at = (c: Cursor) => ({ display: c.display, x: c.x, y: c.y });
   switch (ev.type) {
     case "point":
     case "drag-move": {
       const c = hit(ev.ray);
+      if (c && ev.type === "drag-move" && state.drag) state.drag = c;
       return c ? [{ type: "move", ...at(c) }] : [];
     }
     case "click": {
@@ -87,14 +97,24 @@ export function gestureToMessages(ev: GestureEvent, hit: (ray: Ray) => Cursor | 
     }
     case "drag-start": {
       const c = hit(ev.ray);
-      return c ? [{ type: "move", ...at(c) }, { type: "button", ...at(c), button: "left", down: true }] : [];
+      if (!c) return [];
+      state.drag = c;
+      return [{ type: "move", ...at(c) }, { type: "button", ...at(c), button: "left", down: true }];
     }
     case "drag-end": {
-      const c = hit(ev.ray);
+      const c = hit(ev.ray) ?? state.drag;
+      state.drag = undefined;
       return c ? [{ type: "move", ...at(c) }, { type: "button", ...at(c), button: "left", down: false }] : [];
     }
-    case "scroll":
-      return [{ type: "scroll", dx: Math.round(ev.dx), dy: Math.round(ev.dy) }];
+    case "scroll": {
+      state.scrollX += ev.dx;
+      state.scrollY += ev.dy;
+      const dx = Math.trunc(state.scrollX);
+      const dy = Math.trunc(state.scrollY);
+      state.scrollX -= dx;
+      state.scrollY -= dy;
+      return dx === 0 && dy === 0 ? [] : [{ type: "scroll", dx, dy }];
+    }
     case "magnify":
       return [{ type: "magnify", delta: ev.delta }];
     case "swipe":

@@ -218,7 +218,7 @@ describe("typing session", () => {
   });
   it("a thumb always types Space", () => {
     const s = new TypingSession();
-    expect(s.pressAt(0.5, 0.5, 0, true).actions).toEqual([{ kind: "key", code: "Space", modifiers: [] }]);
+    expect(s.pressAt(0, -0.03, 0, true).actions).toEqual([{ kind: "key", code: "Space", modifiers: [] }]);
   });
   it("a press in the gap beside the keyboard types nothing", () => {
     expect(new TypingSession().pressAt(1, 1, 0).actions).toEqual([]);
@@ -262,5 +262,69 @@ describe("key code coverage", () => {
   });
   it("open() fixture still works for the keyboard tests", () => {
     expect(open().hand).toBe("right");
+  });
+});
+
+import { StripSwipe } from "../src/keyboard/strip";
+import { gestureToMessages, newMapperState } from "../src/protocol";
+
+describe("suggestion strip swipe", () => {
+  const rect = { u0: -0.15, u1: 0.15, v0: 0.06, v1: 0.09 };
+  const tip = (u: number, h = 0.01, v = 0.07, id = "r-index"): FingerTip => ({ id, hand: "right", finger: "index", u, v, h });
+  const sweep = (from: number, to: number, ms: number, h = 0.01) => {
+    const s = new StripSwipe();
+    const hits: (number | undefined)[] = [];
+    for (let t = 0; t <= ms; t += 16) hits.push(s.update(t, [tip(from + ((to - from) * t) / ms, h)], rect));
+    hits.push(s.update(ms + 16, [tip(to, 0.1)], rect)); // lift
+    return hits.filter((x) => x !== undefined);
+  };
+  it("a fast sweep to the right accepts the last third", () => expect(sweep(-0.1, 0.12, 200)).toEqual([2]));
+  it("a fast sweep to the left accepts the first third", () => expect(sweep(0.1, -0.12, 200)).toEqual([0]));
+  it("a slow drift is not a swipe", () => expect(sweep(-0.1, 0.1, 2000)).toEqual([]));
+  it("a swipe high above the strip is not a swipe", () => expect(sweep(-0.1, 0.12, 200, 0.1)).toEqual([]));
+  it("a short move is not a swipe", () => expect(sweep(0, 0.03, 200)).toEqual([]));
+});
+
+describe("Ukrainian punctuation and thumbs", () => {
+  const press = (s: TypingSession, code: string, t = 0) => {
+    const k = key(s.lang, code);
+    return s.pressAt(k.u, k.v, t).actions;
+  };
+  it("Slash types a full stop, Shift+Slash a comma, the apostrophe key an apostrophe, all as text", () => {
+    const s = new TypingSession();
+    press(s, "Globe");
+    expect(press(s, "Slash")).toEqual([{ kind: "text", text: "." }]);
+    press(s, "ShiftLeft", 100);
+    expect(press(s, "Slash", 200)).toEqual([{ kind: "text", text: "," }]);
+    expect(press(s, "Backquote", 300)).toEqual([{ kind: "text", text: "'" }]);
+  });
+  it("punctuation ends the word", () => {
+    const s = new TypingSession();
+    press(s, "Globe");
+    press(s, "KeyQ");
+    press(s, "Slash");
+    expect(s.prefix).toBe("");
+  });
+  it("a thumb far from the keyboard types nothing", () => {
+    expect(new TypingSession().pressAt(0.6, 0.4, 0, true).actions).toEqual([]);
+  });
+});
+
+describe("mapper state", () => {
+  const r = { origin: { x: 0, y: 0, z: 0 }, direction: { x: 0, y: 0, z: -1 } };
+  it("a drag released over nothing still releases the button at the last cursor", () => {
+    const st = newMapperState();
+    let over = true;
+    const hit = () => (over ? { display: 0, x: 0.4, y: 0.4 } : undefined);
+    gestureToMessages({ type: "drag-start", hand: "right", source: "hand", ray: r }, hit, st);
+    over = false;
+    const out = gestureToMessages({ type: "drag-end", hand: "right", source: "hand", ray: r }, hit, st);
+    expect(out).toMatchObject([{ type: "move" }, { type: "button", down: false, button: "left" }]);
+  });
+  it("slow scroll accumulates instead of rounding to nothing", () => {
+    const st = newMapperState();
+    const total = [0.4, 0.4, 0.4, 0.4, 0.4].map((dy) => gestureToMessages({ type: "scroll", hand: "right", source: "hand", dx: 0, dy }, () => undefined, st));
+    const sent = total.flat().reduce((n, m) => n + (m.type === "scroll" ? m.dy : 0), 0);
+    expect(sent).toBe(2);
   });
 });

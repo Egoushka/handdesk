@@ -61,6 +61,7 @@ class HandState {
   /** after a grab ends, ignore pinches until released so the release is not a click */
   suppress = false;
   prev: HandFeatures | undefined;
+  lastRay: Ray | undefined;
   constructor(cfg: GestureConfig, public hand: Hand) {
     this.left = new PressTracker(cfg, hand, "hand", "left");
     this.right = new PressTracker(cfg, hand, "hand", "right");
@@ -113,8 +114,8 @@ export class GestureClassifier {
     // tracking lost: drop state of hands not seen this frame
     for (const [h, st] of this.hands) {
       if (!features.has(h)) {
-        st.left.cancel(this.lastRay, out);
-        st.right.cancel(this.lastRay, out);
+        st.left.cancel(st.lastRay ?? this.lastRay, out);
+        st.right.cancel(st.lastRay ?? this.lastRay, out);
         this.hands.delete(h);
       }
     }
@@ -131,6 +132,7 @@ export class GestureClassifier {
     for (const [hand, f] of features) {
       const st = this.hands.get(hand)!;
       this.lastRay = f.ray;
+      st.lastRay = f.ray;
       if (grabbing) {
         st.left.cancel(f.ray, out);
         st.right.cancel(f.ray, out);

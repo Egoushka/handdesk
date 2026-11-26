@@ -47,26 +47,27 @@ public enum ClientMessage: Equatable {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let type = obj["type"] as? String else { return nil }
         func num(_ k: String) -> Double? { (obj[k] as? NSNumber).flatMap { $0 === kCFBooleanTrue || $0 === kCFBooleanFalse ? nil : $0.doubleValue } }
-        func int(_ k: String) -> Int? { num(k).flatMap { $0.isFinite ? Int($0) : nil } }
+        func int(_ k: String) -> Int? { num(k).flatMap { $0.isFinite && abs($0) < 1e9 ? Int($0) : nil } }
+        func fin(_ k: String) -> Double? { num(k).flatMap { $0.isFinite ? $0 : nil } }
         func bool(_ k: String) -> Bool? { (obj[k] as? NSNumber).flatMap { $0 === kCFBooleanTrue ? true : ($0 === kCFBooleanFalse ? false : nil) } }
         switch type {
         case "subscribe":
             guard let list = obj["displays"] as? [Any] else { return nil }
-            let ids = list.compactMap { ($0 as? NSNumber).map { Int(truncating: $0) } }
-            guard ids.count == list.count else { return nil }
+            let ids = list.compactMap { ($0 as? NSNumber).flatMap { n -> Int? in let d = n.doubleValue; return d.isFinite && d >= 0 && d <= 255 ? Int(d) : nil } }
+            guard ids.count == list.count, ids.count <= 64 else { return nil }
             return .subscribe(ids)
         case "move":
-            guard let d = int("display"), let x = num("x"), let y = num("y"), x.isFinite, y.isFinite else { return nil }
+            guard let d = int("display"), (0...255).contains(d), let x = fin("x"), let y = fin("y") else { return nil }
             return .move(display: d, x: x, y: y)
         case "button":
             guard let d = int("display"), let b = (obj["button"] as? String).flatMap(MouseButton.init(rawValue:)),
-                  let down = bool("down"), let x = num("x"), let y = num("y") else { return nil }
+                  let down = bool("down"), (0...255).contains(d), let x = fin("x"), let y = fin("y") else { return nil }
             return .button(display: d, button: b, down: down, x: x, y: y)
         case "scroll":
-            guard let dx = num("dx"), let dy = num("dy") else { return nil }
+            guard let dx = fin("dx"), let dy = fin("dy") else { return nil }
             return .scroll(dx: dx, dy: dy)
         case "magnify":
-            guard let d = num("delta") else { return nil }
+            guard let d = fin("delta") else { return nil }
             return .magnify(d)
         case "swipe":
             guard let d = (obj["direction"] as? String).flatMap(SwipeDirection.init(rawValue:)) else { return nil }

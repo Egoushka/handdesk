@@ -33,7 +33,7 @@ export interface Snap { key: Key; corrected: boolean }
  * of its key is never overridden.
  */
 export function snap(lang: Lang, prefix: string, u: number, v: number, nearest: Key): Snap {
-  if (nearest.kind !== "char") return { key: nearest, corrected: false };
+  if (nearest.kind !== "char" || !/\p{L}/u.test(nearest.ch ?? "")) return { key: nearest, corrected: false };
   const inner = Math.abs(u - nearest.u) <= AUTOCORRECT.innerFraction * nearest.w && Math.abs(v - nearest.v) <= AUTOCORRECT.innerFraction * nearest.h;
   if (inner) return { key: nearest, corrected: false };
   const total = prefixMass(lang, prefix);

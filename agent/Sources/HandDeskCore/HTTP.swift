@@ -80,7 +80,30 @@ public enum HTTP {
     }
 }
 
+public extension HTTP {
+    /// Added to every static response. The page uses an inline <style> and module scripts from its own origin.
+    static let securityHeaders: [String: String] = [
+        "X-Content-Type-Options": "nosniff",
+        "Referrer-Policy": "no-referrer",
+        "Content-Security-Policy": "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; media-src 'self' blob:",
+    ]
+}
+
 public enum Auth {
+    /// DNS-rebinding guard: only loopback names, plus the configured LAN name in --lan mode.
+    public static func hostAllowed(host: String?, extra: String? = nil) -> Bool {
+        guard var h = host?.lowercased(), !h.isEmpty else { return false }
+        if h.hasPrefix("[") {
+            guard let close = h.firstIndex(of: "]") else { return false }
+            h = String(h[h.startIndex...close])
+        } else if let colon = h.firstIndex(of: ":") {
+            h = String(h[..<colon])
+        }
+        var allowed: Set<String> = ["localhost", "127.0.0.1", "[::1]"]
+        if let e = extra?.lowercased(), !e.isEmpty { allowed.insert(e) }
+        return allowed.contains(h)
+    }
+
     public static func constantTimeEquals(_ a: String, _ b: String) -> Bool {
         let x = Array(a.utf8), y = Array(b.utf8)
         var diff = x.count ^ y.count

@@ -19,6 +19,10 @@ public final class EventMapper {
     private var lastDown: (button: MouseButton, point: CGPoint, time: TimeInterval, count: Int)?
     private var magnifyAccumulator = 0.0
     private var heldModifiers: Modifiers = []
+    private var heldModifierCodes: [String] = []
+    private var lastPoint: CGPoint = .zero
+    public static let maxMagnifyTaps = 8
+    public static let maxScroll = 10000.0
 
     public init(poster: EventPoster, displays: [DisplayInfo], magnifyMode: MagnifyMode = .keys,
                 invertScroll: Bool = false, now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime }) {
@@ -35,10 +39,12 @@ public final class EventMapper {
         case let .move(d, x, y):
             guard let disp = display(d) else { return }
             let p = disp.globalPoint(x: x, y: y)
+            lastPoint = p
             if let b = heldButton { poster.mouseDrag(to: p, button: b) } else { poster.mouseMove(to: p) }
         case let .button(d, button, down, x, y):
             guard let disp = display(d) else { return }
             let p = disp.globalPoint(x: x, y: y)
+            lastPoint = p
             if down {
                 let t = now()
                 var count = 1
@@ -55,14 +61,19 @@ public final class EventMapper {
             }
         case let .scroll(dx, dy):
             let sign: Double = invertScroll ? -1 : 1
-            let ix = Int((dx * sign).rounded()), iy = Int((dy * sign).rounded())
+            guard dx.isFinite, dy.isFinite else { return }
+            let cap = Self.maxScroll
+            let ix = Int((max(-cap, min(cap, dx)) * sign).rounded()), iy = Int((max(-cap, min(cap, dy)) * sign).rounded())
             if ix != 0 || iy != 0 { poster.scroll(dx: ix, dy: iy) }
         case let .magnify(delta):
             guard delta.isFinite else { return }
+            let delta = max(-1, min(1, delta))
             if magnifyMode == .gesture { poster.magnify(delta: delta); return }
             magnifyAccumulator += delta
-            while magnifyAccumulator >= Self.magnifyStep { magnifyAccumulator -= Self.magnifyStep; tap("Equal", .cmd) }
-            while magnifyAccumulator <= -Self.magnifyStep { magnifyAccumulator += Self.magnifyStep; tap("Minus", .cmd) }
+            var taps = 0
+            while magnifyAccumulator >= Self.magnifyStep, taps < Self.maxMagnifyTaps { magnifyAccumulator -= Self.magnifyStep; tap("Equal", .cmd); taps += 1 }
+            while magnifyAccumulator <= -Self.magnifyStep, taps < Self.maxMagnifyTaps { magnifyAccumulator += Self.magnifyStep; tap("Minus", .cmd); taps += 1 }
+            magnifyAccumulator = max(-Self.magnifyStep, min(Self.magnifyStep, magnifyAccumulator))
         case let .swipe(dir):
             switch dir {
             case .left: tap("ArrowLeft", .ctrl)
@@ -72,7 +83,8 @@ public final class EventMapper {
             }
         case let .key(code, down, mods):
             if let m = KeyCodes.modifierKeys[code], let vk = KeyCodes.virtualKey(for: code) {
-                if down { heldModifiers.insert(m) } else { heldModifiers.remove(m) }
+                if down { heldModifiers.insert(m); if !heldModifierCodes.contains(code) { heldModifierCodes.append(code) } }
+                else { heldModifiers.remove(m); heldModifierCodes.removeAll { $0 == code } }
                 poster.flagsChanged(code: vk, down: down, modifiers: heldModifiers)
             } else if let vk = KeyCodes.virtualKey(for: code) {
                 poster.key(code: vk, down: down, modifiers: mods.union(heldModifiers))
@@ -80,6 +92,23 @@ public final class EventMapper {
         case let .text(s):
             poster.text(s)
         }
+    }
+
+    /// Called when a session ends: lets go of a held mouse button and any held modifier so nothing stays stuck.
+    public func releaseAll() {
+        if let b = heldButton {
+            heldButton = nil
+            poster.mouseButton(b, down: false, at: lastPoint, clickCount: lastDown?.count ?? 1)
+        }
+        for code in heldModifierCodes {
+            if let m = KeyCodes.modifierKeys[code], let vk = KeyCodes.virtualKey(for: code) {
+                heldModifiers.remove(m)
+                poster.flagsChanged(code: vk, down: false, modifiers: heldModifiers)
+            }
+        }
+        heldModifierCodes = []
+        heldModifiers = []
+        magnifyAccumulator = 0
     }
 
     private func tap(_ domCode: String, _ mods: Modifiers) {

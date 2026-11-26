@@ -7,6 +7,8 @@ import HandDeskCore
 struct ServerConfig {
     var port: UInt16 = 8787
     var lan = false
+    /// the name clients use to reach the Mac in --lan mode (Host header allowlist)
+    var host: String?
     var p12Path: String?
     var webRoot: String
     var token: String
@@ -69,7 +71,10 @@ final class Server {
         return ident
     }
 
+    static let maxSessions = 8
+
     private func accept(_ conn: NWConnection) {
+        if sessions.count >= Self.maxSessions { conn.cancel(); return }
         let s = Session(connection: conn, server: self)
         sessions[ObjectIdentifier(s)] = s
         s.start()
@@ -81,6 +86,7 @@ final class Server {
         EventMapper(poster: poster, displays: displays, magnifyMode: config.magnifyMode, invertScroll: config.invertScroll)
     }
     var token: String { config.token }
+    var hostName: String? { config.lan ? config.host : nil }
     var webRoot: String { config.webRoot }
     var displayList: [DisplayInfo] { displays }
 
@@ -107,7 +113,15 @@ final class Server {
             Task {
                 do {
                     try await ds.start(fps: config.fps, bitrate: config.bitrate, maxWidth: config.maxWidth)
-                    queue.async { self.streams[i] = ds; self.starting.remove(i) }
+                    queue.async {
+                        self.starting.remove(i)
+                        if self.sessions.values.contains(where: { $0.subscribed.contains(i) }) {
+                            self.streams[i] = ds
+                            ds.requestKeyframe()
+                        } else {
+                            ds.stop() // everyone unsubscribed while it was starting
+                        }
+                    }
                 } catch {
                     queue.async {
                         self.starting.remove(i)
@@ -120,7 +134,7 @@ final class Server {
     }
 
     private func broadcast(_ wire: Data, display: Int, keyframe: Bool) {
-        for s in sessions.values where s.subscribed.contains(display) { s.sendVideo(wire, keyframe: keyframe) }
+        for s in sessions.values where s.subscribed.contains(display) { s.sendVideo(wire, display: display, keyframe: keyframe) }
     }
 }
 
@@ -133,6 +147,8 @@ final class Session {
     private(set) var subscribed: Set<Int> = []
     private var waitingForKey = Set<Int>()
     private var pendingBytes = 0
+    private var closed = false
+    private var deadline: DispatchWorkItem?
 
     init(connection: NWConnection, server: Server) { conn = connection; self.server = server }
 
@@ -144,10 +160,18 @@ final class Session {
             }
         }
         conn.start(queue: server.queue)
+        // a connection that has not finished the WebSocket upgrade within 10 s is dropped (slow clients, idle sockets)
+        let d = DispatchWorkItem { [weak self] in if self?.upgraded == false { self?.close() } }
+        deadline = d
+        server.queue.asyncAfter(deadline: .now() + 10, execute: d)
         receive()
     }
 
     private func close() {
+        guard !closed else { return }
+        closed = true
+        deadline?.cancel()
+        mapper?.releaseAll() // never leave a mouse button or modifier held after the session ends
         conn.cancel()
         server.remove(self)
     }
@@ -170,6 +194,9 @@ final class Session {
         case .malformed: send(HTTP.response(status: 400, reason: "Bad Request"), thenClose: true)
         case let .request(req, consumed):
             buffer.removeFirst(consumed)
+            guard Auth.hostAllowed(host: req.headers["host"], extra: server.hostName) else {
+                return send(HTTP.response(status: 403, reason: "Forbidden"), thenClose: true)
+            }
             if req.path == "/ws" { upgrade(req) } else { serveStatic(req) }
         }
     }
@@ -195,7 +222,7 @@ final class Session {
               let body = FileManager.default.contents(atPath: path) else {
             return send(HTTP.response(status: 404, reason: "Not Found", body: Data("not found".utf8)), thenClose: true)
         }
-        send(HTTP.response(status: 200, reason: "OK", headers: ["Content-Type": HTTP.mimeType(for: path), "Cache-Control": "no-store", "Connection": "close"], body: body), thenClose: true)
+        send(HTTP.response(status: 200, reason: "OK", headers: HTTP.securityHeaders.merging(["Content-Type": HTTP.mimeType(for: path), "Cache-Control": "no-store", "Connection": "close"]) { $1 }, body: body), thenClose: true)
     }
 
     private func processFrames() {
@@ -219,10 +246,10 @@ final class Session {
         guard let msg = ClientMessage.decode(data) else { return }
         if case let .subscribe(list) = msg {
             let valid = Set(list.filter { server.displayList.indices.contains($0) })
-            let added = Array(valid.subtracting(subscribed))
             subscribed = valid
-            waitingForKey.formUnion(added)
-            server.subscriptionsChanged(newlySubscribed: added)
+            // every subscribe asks for a fresh keyframe, so a page that lost its decoder recovers on a static screen
+            waitingForKey.formUnion(valid)
+            server.subscriptionsChanged(newlySubscribed: Array(valid))
         } else {
             mapper?.handle(msg)
         }
@@ -231,12 +258,12 @@ final class Session {
     func sendText(_ payload: Data) { send(WebSocket.encode(opcode: .text, payload: payload)) }
 
     /// Drops delta frames while the socket is backed up; a keyframe always goes out and resets the backlog.
-    func sendVideo(_ wire: Data, keyframe: Bool) {
-        guard upgraded else { return }
-        if waitingForKey.count > 0 && !keyframe { return }
+    func sendVideo(_ wire: Data, display: Int, keyframe: Bool) {
+        guard upgraded, !closed else { return }
+        if waitingForKey.contains(display) && !keyframe { return }
         if pendingBytes > 4_000_000 && !keyframe { return }
         pendingBytes += wire.count
-        if keyframe { waitingForKey.removeAll() }
+        if keyframe { waitingForKey.remove(display) }
         conn.send(content: wire, completion: .contentProcessed { [weak self] _ in self?.pendingBytes -= wire.count })
     }
 

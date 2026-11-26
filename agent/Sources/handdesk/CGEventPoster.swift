@@ -22,7 +22,7 @@ final class CGEventPoster: EventPoster {
     }
 
     func scroll(dx: Int, dy: Int) {
-        CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: Int32(dy), wheel2: Int32(dx), wheel3: 0)?.post(tap: .cghidEventTap)
+        CGEvent(scrollWheelEvent2Source: source, units: .pixel, wheelCount: 2, wheel1: Int32(clamping: dy), wheel2: Int32(clamping: dx), wheel3: 0)?.post(tap: .cghidEventTap)
     }
 
     /// Experimental: a synthetic gesture event (type 29, subtype 8, field 113 = magnification). Undocumented; behind --magnify=gesture.
@@ -48,13 +48,16 @@ final class CGEventPoster: EventPoster {
         e.post(tap: .cghidEventTap)
     }
 
+    /// Chunks of at most 16 UTF-16 units: apps keep only the first few units of one event's Unicode string.
+    /// Virtual key 0 is the A key; apps that read key codes instead of the string may see an "a" (not verified without the headset).
     func text(_ string: String) {
-        let units = Array(string.utf16)
-        for down in [true, false] {
-            guard let e = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down) else { continue }
-            e.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
-            e.flags = []
-            e.post(tap: .cghidEventTap)
+        for units in TextChunks.split(string, maxUnits: 16) {
+            for down in [true, false] {
+                guard let e = CGEvent(keyboardEventSource: source, virtualKey: 0, keyDown: down) else { continue }
+                e.keyboardSetUnicodeString(stringLength: units.count, unicodeString: units)
+                e.flags = []
+                e.post(tap: .cghidEventTap)
+            }
         }
     }
 }

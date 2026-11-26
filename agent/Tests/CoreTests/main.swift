@@ -44,5 +44,16 @@ run(VideoAndSupportTests.init, [
     ("testTokenGenerateAndStore", VideoAndSupportTests.testTokenGenerateAndStore),
     ("testHelloMessage", VideoAndSupportTests.testHelloMessage),
 ])
+run(HardeningTests.init, [
+    ("testReleaseAllLetsGoOfButtonAndModifiers", HardeningTests.testReleaseAllLetsGoOfButtonAndModifiers),
+    ("testMagnifyIsClampedAndCapped", HardeningTests.testMagnifyIsClampedAndCapped),
+    ("testScrollIsClamped", HardeningTests.testScrollIsClamped),
+    ("testDecodeRejectsOutOfRangeAndNonFinite", HardeningTests.testDecodeRejectsOutOfRangeAndNonFinite),
+    ("testTextChunksKeepCharactersWhole", HardeningTests.testTextChunksKeepCharactersWhole),
+    ("testLaunchAgentArgumentsCarryAbsoluteWebPath", HardeningTests.testLaunchAgentArgumentsCarryAbsoluteWebPath),
+    ("testHostAllowlist", HardeningTests.testHostAllowlist),
+    ("testSecurityHeaders", HardeningTests.testSecurityHeaders),
+    ("testExistingTokenFileIsTightenedTo0600", HardeningTests.testExistingTokenFileIsTightenedTo0600),
+])
 print("\(testCount) tests, \(checkCount) checks, \(failureCount) failures")
 exit(failureCount == 0 ? 0 : 1)

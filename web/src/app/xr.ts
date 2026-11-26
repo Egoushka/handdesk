@@ -12,7 +12,7 @@ export const JOINTS: JointName[] = [
 
 export const SESSION_INIT = {
   requiredFeatures: ["local-floor"],
-  optionalFeatures: ["hand-tracking", "plane-detection", "hit-test", "layers"],
+  optionalFeatures: ["hand-tracking"],
 } as const;
 
 export type XRMode = "immersive-ar" | "immersive-vr";

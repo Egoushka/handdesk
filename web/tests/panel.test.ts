@@ -63,7 +63,7 @@ describe("protocol", () => {
     expect(gestureToMessages({ type: "click", hand: "right", source: "hand", button: "left", ray: r }, () => undefined)).toEqual([]);
   });
   it("scroll, magnify, swipe and mission control", () => {
-    expect(gestureToMessages({ type: "scroll", hand: "right", source: "hand", dx: 1.4, dy: -20.6 }, hit)).toEqual([{ type: "scroll", dx: 1, dy: -21 }]);
+    expect(gestureToMessages({ type: "scroll", hand: "right", source: "hand", dx: 1.4, dy: -20.6 }, hit)).toEqual([{ type: "scroll", dx: 1, dy: -20 }]);
     expect(gestureToMessages({ type: "magnify", hand: "right", delta: 0.1 }, hit)).toEqual([{ type: "magnify", delta: 0.1 }]);
     expect(gestureToMessages({ type: "swipe", hand: "right", source: "hand", direction: "left" }, hit)).toEqual([{ type: "swipe", direction: "left" }]);
     expect(gestureToMessages({ type: "mission-control", hand: "left", source: "controller" }, hit)).toEqual([{ type: "swipe", direction: "up" }]);
