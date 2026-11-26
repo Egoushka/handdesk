@@ -1,0 +1,8 @@
+node_modules/
+dist/
+.build/
+.swiftpm/
+test-results/
+playwright-report/
+*.p12
+.DS_Store
