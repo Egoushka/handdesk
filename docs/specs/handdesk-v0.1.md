@@ -18,7 +18,7 @@ One HTTP port (default 8787) serves `web/dist` and a WebSocket at `/ws?t=<token>
 Video is H.264 Annex B over the WebSocket, decoded in the page with WebCodecs. Input is JSON text frames.
 Security: the agent binds `127.0.0.1` by default; the Quest reaches it as `http://localhost:8787` through `adb reverse`
 (localhost is a secure context, so WebXR works with no certificate). `--lan` binds all interfaces and needs `--tls-p12`
-(a publicly trusted cert for a name that resolves to the Mac). `/ws` needs the pairing token and a same-host `Origin`.
+(a publicly trusted cert for a name that resolves to the Mac). `/ws` needs the pairing token, a `Host` of `localhost`, `127.0.0.1`, `[::1]` or the `--host` name (DNS rebinding guard), and a same-host `Origin`.
 
 ### Server to client
 
@@ -57,18 +57,17 @@ Security: the agent binds `127.0.0.1` by default; the Quest reaches it as `http:
 
 The main typing path. The real Bluetooth keyboard still works unchanged and is an option.
 
-- Surface mode: a ten-finger keyboard laid on the physical desk. Plane from WebXR `plane-detection` or `hit-test` when the browser grants it,
-  else calibrated by laying a flat hand on the desk (palm height becomes the plane). The desk gives touch feedback, which is what allows fast typing.
+- Surface mode: a ten-finger keyboard laid on the physical desk. The plane is calibrated by laying a flat hand (or two) on the desk: fingertip height becomes the plane. (WebXR plane detection and hit-test are not used in v0.1.) The desk gives touch feedback, which is what allows fast typing.
 - Poke mode: the same keyboard floating in mid air, for when there is no surface; a deeper, slower press (fingertip crossing the plane).
 - Press detection (pure TypeScript, per fingertip, 10 fingers): a press is a downward fingertip speed peak that ends at the plane
   (height under contact height) and reverses or stops; the key is the one under the fingertip at the moment of contact.
   A finger resting on the plane (low speed, no recent downward peak) never presses. Two fingers pressing at once give two keys. Thumbs press Space.
   Press feedback: key highlight and a short click sound (WebAudio).
-- Layouts: US English and Ukrainian (ЙЦУКЕН), switched by the globe key on the keyboard or a left-hand tap on the keyboard's left edge. Modifiers Cmd, Ctrl, Opt, Shift are sticky (one tap arms for the next key, double tap locks) so Cmd-shortcuts work.
-- Sending: letters in English go as `key`; Ukrainian letters go as `text` (independent of the Mac input source); with Cmd or Ctrl armed the physical key goes as `key` with modifiers.
+- Layouts: US English and Ukrainian (ЙЦУКЕН), switched by the globe key on the keyboard or the toolbar. Modifiers Cmd, Ctrl, Opt, Shift are sticky (one tap arms for the next key, double tap locks) so Cmd-shortcuts work.
+- Sending: letters in English go as `key`; Ukrainian letters go as `text` (independent of the Mac input source); with Cmd, Ctrl or Opt armed the physical key goes as `key` with modifiers. Ukrainian punctuation (full stop on Slash, comma on Shift+Slash, apostrophe) also goes as `text`.
   Backspace, Enter, Tab, Escape, arrows always go as `key`.
 - Speed aids: a local suggestion strip (small word list per language, frequency ranked) and autocorrect that snaps an edge press to the likely key
-  using a key-press probability model (Gaussian over key centres, ranked with the word list prefix). Swipe a fingertip across the strip, or tap a suggestion, to accept; acceptance sends `text` for the rest of the word. No cloud.
+  using a key-press probability model (Gaussian over key centres, ranked with the word list prefix). Swipe a fingertip across the strip and lift (the suggestion under the last point is taken), or tap a suggestion, to accept; acceptance sends `text` for the rest of the word. No cloud.
 
 ## Acceptance checks (machine-run)
 
@@ -79,9 +78,9 @@ The main typing path. The real Bluetooth keyboard still works unchanged and is a
 | A3 | Protocol: message encode/validate, video frame parse | `cd web && npm test` |
 | A9 | Press detection on synthetic fingertip trajectories: tap counts, resting finger does not, two fingers give two keys, thumbs give space, poke mode | `cd web && npm test` |
 | A10 | Autocorrect: an edge press maps to the intended key in common EN and UK words; suggestions | `cd web && npm test` |
-| A11 | Key mapping: DOM key code to CGEvent key code and modifier flags, `text` and `key` message to poster calls | `cd agent && swift test` |
-| A4 | Agent event mapping: each message to the exact poster call sequence with a fake `EventPoster` | `cd agent && swift test` |
-| A5 | Agent framing: HTTP request parse, WebSocket handshake and frame codec, token check | `cd agent && swift test` |
+| A11 | Key mapping: DOM key code to CGEvent key code and modifier flags, `text` and `key` message to poster calls | `cd agent && swift run core-tests` |
+| A4 | Agent event mapping: each message to the exact poster call sequence with a fake `EventPoster` | `cd agent && swift run core-tests` |
+| A5 | Agent framing: HTTP request parse, WebSocket handshake and frame codec, token check | `cd agent && swift run core-tests` |
 | A6 | Agent builds release | `cd agent && swift build -c release` |
 | A7 | Headless: page loads, Enter AR requests `immersive-ar` with `hand-tracking` (emulated `navigator.xr`) | `cd web && npm run e2e` |
 | A8 | Web type check and production build | `cd web && npm run check && npm run build` |

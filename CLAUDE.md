@@ -1,0 +1,9 @@
+# handdesk
+
+Immersive Mac desktop on Quest 3 by hand tracking. Read `docs/specs/handdesk-v0.1.md` (contract and acceptance checks) and `docs/decisions.md` (why) first.
+
+- `web/` TypeScript + Vite + three.js. `src/gesture` and `src/keyboard` stay pure (no DOM, no three): they are unit-tested on synthetic joints (`tests/fixtures.ts`). Fast tier: `cd web && npm test`. Full: `npm run check && npm test && npm run build && npm run e2e` (devbox: `export PLAYWRIGHT_BROWSERS_PATH=/home/node/work/.devbox/ms-playwright`).
+- `agent/` SwiftPM, macOS only. `HandDeskCore` has no capture or CGEvent code: it is tested with a fake `EventPoster` by `swift run core-tests` (no XCTest on a Command-Line-Tools Mac). Build and test over `ssh mac` (rsync `agent/` to a scratch dir, no sudo). Never open a `/ws` session in a test: it triggers the Screen Recording prompt.
+- The wire protocol lives in the spec, `web/src/protocol.ts` and `agent/Sources/HandDeskCore/Messages.swift`: change all three together. A test reads the Swift key table to prove every virtual key has a Mac key code.
+- The canvas must stay under `#ui` (z-index, pointer-events none), or a desktop click never reaches the Enter buttons.
+- Thresholds in `gesture/config.ts` and `keyboard/press.ts` are starting values; tune on the headset, not in tests.

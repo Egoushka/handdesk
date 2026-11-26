@@ -41,10 +41,16 @@ Pinch 25 mm on, 40 mm off; swipe 100 mm in 500 ms; click under 600 ms and 15 mm 
 
 ## D11 Virtual keyboard is the main typing path (new requirement, 2026-11-26)
 Surface keyboard on the physical desk, because touching a real surface is what makes ten-finger typing fast; mid-air poke is the fallback. Press = downward speed peak ending at the plane, never plain collision, so resting fingers never type.
-Plane source order: WebXR plane detection, hit-test, then flat-hand calibration (palm height). The first two are optional features and not guaranteed on Quest Browser, so calibration is the dependable one.
+The plane comes from flat-hand calibration (lowest fingertip height). WebXR plane detection and hit-test are not guaranteed on Quest Browser, were requested but never used in the first cut, and are dropped from the session request until they are implemented.
 
 ## D12 Ukrainian typed as Unicode text, English as physical keys
 Letters sent as `text` work whatever input source the Mac has active, so the headset layout and the Mac cannot disagree. Shortcuts (Cmd/Ctrl held) must be physical keys, so they go as `key` with the Latin position of the key. Switching layout on the headset never touches the Mac's input source.
 
 ## D13 Autocorrect: Gaussian key-press model plus word-list prefix
 Each press scores all keys by a Gaussian around the key centre (sigma about 0.45 key width, a starting value) times a prior from the word list's prefix probabilities; the best key wins only when the press is outside the key's inner 60% (edge press), so deliberate presses are never overridden. Word lists are small bundled frequency lists (a starting vocabulary, not a full dictionary).
+
+## D14 Agent tests are an executable, `swift run core-tests`
+The Mac has only the Command Line Tools: no XCTest, and the Swift Testing macros fail to load. A small assertion harness in an executable target runs the same checks, exits 1 on a failure, and works on a stock runner too. Reverse if: a runner has full Xcode and `swift test` is wanted; the tests port over.
+
+## D15 Gate review fixes (2026-11-26)
+An independent review of the whole repo found one high correctness bug (a left button left held when a drag ended over nothing or a session dropped) and several medium ones (unbounded numbers in the agent, no connection cap, thumb typing Space anywhere, no Ukrainian full stop or apostrophe, a LaunchAgent with no web path). All fixed with tests. Not done: build attestation for release files and code signing, listed as open in THREAT-MODEL.md.
