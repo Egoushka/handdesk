@@ -89,6 +89,8 @@ run(MacTests.init, [
     ("testVirtualDisplayUnavailableAndLimit", MacTests.testVirtualDisplayUnavailableAndLimit),
     ("testLastClientLeavingRemovesVirtualDisplaysAndRestoresBrightness", MacTests.testLastClientLeavingRemovesVirtualDisplaysAndRestoresBrightness),
     ("testSpotlightResultsAreOpenedByIdNeverByPath", MacTests.testSpotlightResultsAreOpenedByIdNeverByPath),
+    ("testRaiseDecodesAndBringsOneWindowForward", MacTests.testRaiseDecodesAndBringsOneWindowForward),
+    ("testWindowActivatorBeatsAppActivator", MacTests.testWindowActivatorBeatsAppActivator),
     ("testOtherMessagesAreNotHandled", MacTests.testOtherMessagesAreNotHandled),
     ("testMdfindArgumentsAreAnArrayAndEscaped", MacTests.testMdfindArgumentsAreAnArrayAndEscaped),
     ("testSpotlightRankAppsFirstDedupedAndCapped", MacTests.testSpotlightRankAppsFirstDedupedAndCapped),

@@ -14,6 +14,13 @@ import { applyGrab, pickPanel, planePoint, type Panel } from "../panel";
 import { gestureToMessages, keyActionToMessages, newMapperState, type ClientMessage } from "../protocol";
 import { DirectTouch } from "../space/touch";
 import { dragHandle, handlesOf, handlesVisible, distanceToPanel, pickHandle, type HandleKind } from "../space/handles";
+import { windowPanel } from "../space/windows";
+import { ExtraGestures, EXTRA_CHEAT_SHEET, type ExtraEvent } from "../gesture/extra";
+import { extraToMessages } from "../gesture/extraMessages";
+import { effectiveHandMode, HAND_MODES, loadHandMode, nextHandMode, saveHandMode, type HandMode } from "../hands/mode";
+import { SkinnedHands } from "../hands/skin";
+import { inTitleBand, titleDragCenter } from "../space/titledrag";
+import { sessionInit } from "./session";
 import { ENVIRONMENTS, isVr, loadLayout, nextEnvironment, recenterPanels, saveLayout, type EnvId } from "../space/layout";
 import { Connection } from "./connection";
 import { dirToWorld, rayToWorld, readInput, startSession, toWorld, type HeadFrame, type XRMode } from "./xr";
@@ -66,9 +73,10 @@ let lastHead: HeadFrame = { position: { x: 0, y: 1.6, z: 0 }, yaw: 0 };
 
 // ---- ui panels ----
 const intro = new UiPanel("intro", 0.9, 0.42, 5);
-const menu = new UiPanel("menu", 0.62, 0.84, 16);
+const menu = new UiPanel("menu", 0.62, 0.95, 18);
+const gestures = new UiPanel("gestures", 0.9, 0.5, 10);
 const launcher = new UiPanel("launcher", 0.8, 1.15, 26);
-const uiPanels = [intro, menu, launcher];
+const uiPanels = [intro, menu, launcher, gestures];
 for (const u of uiPanels) scene.add(u.mesh);
 const statusBar = new Billboard(1.1, 0.07, 30);
 const hintBar = new Billboard(0.5, 0.07, 32);
@@ -134,13 +142,13 @@ function syncDisplays(n: number, list: { name: string; width: number; height: nu
 function addWindowPanel(id: number): void {
   const w = mac.windows.find((x) => x.id === id);
   if (!w || windowViews.has(id)) return;
-  const width = Math.min(1.6, Math.max(0.6, w.width / 900));
-  const panel: Panel = { display: -2, windowId: id, center: { x: 0, y: 1.3, z: -1.2 }, yaw: 0, width, height: width * (w.height / w.width), curve: 0.2 };
+  const panel = windowPanel(id, w, lastHead, windowViews.size);
   const v = new PanelView(panel, Math.round(w.width * 2), Math.round(w.height * 2), `${w.app}: ${w.title || "window"}`);
   windowViews.set(id, v);
   scene.add(v.mesh);
-  arrange(lastHead);
   conn.subscribe(displayViews.map((_, i) => i), [...windowViews.keys()]);
+  conn.send({ type: "raise", window: id }); // the Mac window comes forward too
+  log("info", `window panel added: ${w.app}`);
 }
 
 function removeWindowPanel(id: number): void {
@@ -151,8 +159,9 @@ function removeWindowPanel(id: number): void {
   conn.subscribe(displayViews.map((_, i) => i), [...windowViews.keys()]);
 }
 
+/** Recenter the display row. Window panels keep their own place: they spawn near the head and are moved by hand. */
 function arrange(head: HeadFrame): void {
-  const views = allViews();
+  const views = displayViews;
   recenterPanels(views.map((v) => v.panel), head).forEach((p, i) => { views[i]!.panel = p; views[i]!.sync(); });
 }
 
@@ -169,6 +178,18 @@ const stripSwipe = new StripSwipe();
 let audio: AudioContext | undefined;
 let calibrating: { until: number; planes: TypingPlane[] } | undefined;
 
+// ---- hands ----
+const skinned = new SkinnedHands(renderer);
+scene.add(skinned.group);
+let handSaved: HandMode | undefined = loadHandMode(localStorage);
+let handMode: HandMode = effectiveHandMode(handSaved, false);
+let xrMode: XRMode = "immersive-ar";
+function applyHandMode(): void {
+  handMode = effectiveHandMode(handSaved, xrMode === "immersive-vr" || isVr(env));
+  handsView.group.visible = handMode === "joints";
+  skinned.show(handMode === "skinned");
+}
+
 // ---- menu ----
 const menuRows = (): Row[] => [
   { text: "handdesk", sub: "cheat sheet", header: true },
@@ -179,9 +200,11 @@ const menuRows = (): Row[] => [
   { text: keyboardOn ? "Keyboard: on" : "Keyboard: off", action: { kind: "local", id: "kb" } },
   { text: calibrating ? "Hands flat on the desk..." : pokeMode ? "Find desk (hands flat)" : "Desk set: find again", action: { kind: "local", id: "cal" } },
   { text: "Launcher", action: { kind: "local", id: "launcher" } },
+  { text: `Hands: ${HAND_MODES.find((m) => m.id === handMode)!.label}`, action: { kind: "local", id: "hands" } },
+  { text: "More gestures", action: { kind: "local", id: "gestures" } },
 ];
 function localAction(id: string, time: number): void {
-  if (id === "env") { env = nextEnvironment(env); envs.set(env); localStorage.setItem("handdesk.env", env); }
+  if (id === "env") { env = nextEnvironment(env); envs.set(env); localStorage.setItem("handdesk.env", env); applyHandMode(); }
   else if (id === "recenter") arrange(lastHead);
   else if (id === "save") {
     saveLayout(localStorage, {
@@ -194,6 +217,8 @@ function localAction(id: string, time: number): void {
   } else if (id === "kb") { keyboardOn = !keyboardOn; keyboardView.mesh.visible = keyboardOn; }
   else if (id === "cal") calibrating = { until: time + 2500, planes: [] };
   else if (id === "launcher") { launcher.show(!launcher.visible); launcherFocused = launcher.visible; if (launcher.visible) { conn.send({ type: "windows" }); conn.send({ type: "apps" }); placeUi(launcher, lastHead, -0.55, 1.1); } }
+  else if (id === "hands") { handSaved = nextHandMode(handMode); saveHandMode(localStorage, handSaved); applyHandMode(); }
+  else if (id === "gestures") { gestures.setRows([{ text: "More gestures (tap to close)", header: true }, ...EXTRA_CHEAT_SHEET.map((t) => ({ text: t, header: true }))]); gestures.show(!gestures.visible); placeUi(gestures, lastHead, 0.5, 1.1); }
   else if (id === "addDisplay") conn.send({ type: "virtualDisplay", action: "add", width: 2560, height: 1440, name: "handdesk" });
   else if (id === "dimOn") conn.send({ type: "dimPhysical", on: true });
   else if (id === "dimOff") conn.send({ type: "dimPhysical", on: false });
@@ -235,6 +260,10 @@ let grabStart: Panel | undefined;
 let grabView: PanelView | undefined;
 let handleDrag: { view: PanelView; kind: HandleKind; start: Panel; from: Vec3 } | undefined;
 let uiSwallow = false;
+let titleDrag: { view: PanelView; start: Panel; from: Vec3 } | undefined;
+const extra = new ExtraGestures();
+const fistState = newMapperState();
+let spread: { view: PanelView; start: Panel } | undefined;
 const touchCursor = new Map<string, { display: number; window?: number; x: number; y: number }>();
 let lastGestureLog = 0;
 
@@ -247,6 +276,7 @@ function clickUi(u: UiPanel, y: number, time: number): void {
   const i = rowIndexAt(y, u.slots());
   const row = u.rows[i];
   if (u.id === "intro") { u.show(false); markIntroDone(localStorage); return; }
+  if (u.id === "gestures") { u.show(false); return; }
   if (u.id === "launcher") launcherFocused = true;
   const a = row?.action;
   if (!a) return;
@@ -268,6 +298,12 @@ function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
   }
   if (ev.type === "grab-end") { grabStart = undefined; grabView = undefined; return; }
 
+  if (ev.type === "drag-move" && titleDrag) {
+    const to = planePoint(rayToWorld(ev.ray, head), titleDrag.start);
+    if (to) { titleDrag.view.panel = { ...titleDrag.start, center: titleDragCenter(titleDrag.start, titleDrag.from, to) }; titleDrag.view.sync(); }
+    return;
+  }
+  if (ev.type === "drag-end" && titleDrag) { titleDrag = undefined; return; }
   if (ev.type === "drag-move" && handleDrag) {
     const to = planePoint(rayToWorld(ev.ray, head), handleDrag.start);
     if (to) { handleDrag.view.panel = dragHandle(handleDrag.start, handleDrag.kind, handleDrag.from, to); handleDrag.view.sync(); }
@@ -297,6 +333,11 @@ function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
       }
     }
     const hit = pickPanel(ray, macPanels());
+    if (ev.type === "drag-start" && hit && inTitleBand(hit.hit.y)) {
+      const view = allViews().find((v) => v.panel === hit.panel);
+      const from = planePoint(ray, hit.panel);
+      if (view && from) { titleDrag = { view, start: view.panel, from }; activePanel = hit.panel; log("info", "gesture title-move"); return; }
+    }
     if (hit) {
       activePanel = hit.panel;
       if (ev.type === "point") setRay(ev.hand, ray, hit.hit.t);
@@ -304,6 +345,32 @@ function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
   }
   if (ev.type !== "point" && ev.type !== "drag-move" && ev.type !== "scroll" && ev.type !== "magnify" && time - lastGestureLog > 250) { lastGestureLog = time; log("debug", `gesture ${ev.type}`); }
   for (const m of gestureToMessages(ev, hitFn(head), mapperState)) conn.send(m);
+}
+
+/** The v0.3 gestures: shortcuts go straight out; fist drag reuses the pinch-drag mapping; spread scales the panel in the gaze. */
+function handleExtra(ev: ExtraEvent, head: HeadFrame): void {
+  if (ev.type === "fist-start" || ev.type === "fist-move" || ev.type === "fist-end") {
+    if (!ev.ray) return;
+    const kind = ev.type === "fist-start" ? "drag-start" : ev.type === "fist-move" ? "drag-move" : "drag-end";
+    for (const m of gestureToMessages({ type: kind, hand: ev.hand, source: "hand", ray: ev.ray }, hitFn(head), fistState)) conn.send(m);
+    if (ev.type === "fist-start") log("info", "gesture fist-drag");
+    return;
+  }
+  if (ev.type === "spread") {
+    if (!spread) {
+      const gaze = pickPanel({ origin: head.position, direction: { x: Math.sin(head.yaw), y: 0, z: -Math.cos(head.yaw) } }, macPanels());
+      const view = gaze && allViews().find((v) => v.panel === gaze.panel);
+      if (!view) return;
+      spread = { view, start: view.panel };
+      log("info", "gesture spread");
+    }
+    spread.view.panel = applyGrab(spread.start, { x: 0, y: 0, z: 0 }, ev.scale, 0);
+    spread.view.sync();
+    return;
+  }
+  if (ev.type === "spread-end") { spread = undefined; return; }
+  log("info", `gesture ${ev.type}`);
+  for (const m of extraToMessages(ev)) conn.send(m);
 }
 
 function pickPanelUi(ray: Ray): { u: UiPanel; y: number } | undefined {
@@ -450,7 +517,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
       menu.sync();
     }
   } else if (menu.visible && !uiHover) menu.show(false);
-  if (launcher.visible) launcher.setRows(launcherRows(mac, launcherQuery), uiHover?.id === "launcher" ? uiHover.row : -1);
+  if (launcher.visible) launcher.setRows(launcherRows(mac, launcherQuery, new Set(windowViews.keys())), uiHover?.id === "launcher" ? uiHover.row : -1);
   if (uiHover && time - uiHover.t > 300) uiHover = undefined;
 
   // direct touch: the index finger of hands not typing
@@ -479,6 +546,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   pointedHandPos = input.worldHands.flatMap((h) => (h.joints["index-finger-tip"] ? [h.joints["index-finger-tip"]!] : []));
   const frameIn = { ...input.frame, hands: tracking.lost ? [] : input.frame.hands.filter((h) => !typists.has(h.hand) && !touching.has(h.hand)) };
   for (const ev of classifier.update(frameIn)) handleGesture(ev, head, time);
+  for (const ev of extra.update(frameIn)) handleExtra(ev, head);
   if (keyboardOn && !tracking.lost) handleKeyboard(input.worldHands, time);
 
   // controllers: B held for a second recenters
@@ -530,11 +598,14 @@ function surfacePoint(p: Panel, x: number, y: number): Vec3 {
 // ---- entering a session ----
 async function begin(s: XRSession, mode: XRMode): Promise<void> {
   placed = false;
+  xrMode = mode;
   classifier.reset();
+  extra.reset();
   detector.reset();
   if (mode === "immersive-vr" && !isVr(env)) { env = "grid"; envs.set(env); }
   s.addEventListener("end", () => { renderer.setAnimationLoop(null); setStatus("Session ended"); $("ui").style.display = "flex"; log("info", "xr session ended"); });
   await renderer.xr.setSession(s);
+  applyHandMode();
   renderer.setAnimationLoop(onFrame);
   $("ui").style.display = "none";
   log("info", `xr session started: ${mode}`);
@@ -568,7 +639,7 @@ void (async () => {
     // the browser's own Enter button, where the browser has it: opens straight into the session
     const offer = (xr as unknown as { offerSession?: (m: string, i: unknown) => Promise<XRSession> }).offerSession;
     if (ar && offer) {
-      void offer.call(xr, "immersive-ar", { requiredFeatures: ["local-floor"], optionalFeatures: ["hand-tracking"] }).then((s) => begin(s, "immersive-ar")).catch(() => undefined);
+      void offer.call(xr, "immersive-ar", sessionInit("immersive-ar")).then((s) => begin(s, "immersive-ar")).catch(() => undefined);
       setStatus("Press Enter AR, or the browser's Enter button.");
     } else if (ar) setStatus("Press Enter AR (or click anywhere on this page).");
   }

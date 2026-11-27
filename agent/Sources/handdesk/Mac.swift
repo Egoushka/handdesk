@@ -5,6 +5,11 @@ import IOKit
 import IOKit.graphics
 import CVD
 import HandDeskCore
+import ApplicationServices
+
+/// Private but long-stable: the CGWindowID of an Accessibility window element.
+@_silgen_name("_AXUIElementGetWindow")
+func _AXUIElementGetWindow(_ element: AXUIElement, _ id: UnsafeMutablePointer<CGWindowID>) -> AXError
 
 /// The real OS behind `SystemServices`. Nothing here is unit tested (it needs a live session); the logic around it is.
 final class RealSystem: SystemServices {
@@ -36,7 +41,41 @@ final class RealSystem: SystemServices {
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
     }
 
-    func activate(pid: Int32) { _ = NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows]) }
+    /// NSRunningApplication.activate is only a request: from a background agent on macOS 14+ it often does nothing. The Accessibility API (which the
+    /// agent already needs to post input) sets the app frontmost and raises the exact window, so those go first; activate is the fallback.
+    func activate(pid: Int32) {
+        if setFrontmost(pid: pid) { return }
+        _ = NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows])
+    }
+
+    func raise(window: UInt32, pid: Int32) {
+        var raised = false
+        if AXIsProcessTrusted() {
+            let app = AXUIElementCreateApplication(pid)
+            AXUIElementSetMessagingTimeout(app, 1.0)
+            var ref: CFTypeRef?
+            if AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &ref) == .success, let wins = ref as? [AXUIElement] {
+                for w in wins {
+                    var id: CGWindowID = 0
+                    if _AXUIElementGetWindow(w, &id) == .success, id == window {
+                        raised = AXUIElementPerformAction(w, kAXRaiseAction as CFString) == .success
+                        AXUIElementSetAttributeValue(w, kAXMainAttribute as CFString, kCFBooleanTrue)
+                        break
+                    }
+                }
+            }
+        }
+        let front = setFrontmost(pid: pid)
+        if !front { _ = NSRunningApplication(processIdentifier: pid)?.activate(options: [.activateAllWindows]) }
+        log.info("raise_result", ["window": Int(window), "raised": raised, "frontmost": front, "trusted": AXIsProcessTrusted()])
+    }
+
+    private func setFrontmost(pid: Int32) -> Bool {
+        guard AXIsProcessTrusted() else { return false }
+        let app = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(app, 1.0)
+        return AXUIElementSetAttributeValue(app, kAXFrontmostAttribute as CFString, kCFBooleanTrue) == .success
+    }
 
     func activate(bundleId: String) -> Bool {
         guard let app = NSRunningApplication.runningApplications(withBundleIdentifier: bundleId).first else { return false }

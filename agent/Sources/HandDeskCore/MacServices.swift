@@ -100,6 +100,8 @@ public protocol SystemServices: AnyObject {
     func listWindows() -> [WindowInfo]
     func listApps() -> [AppInfo]
     func activate(pid: Int32)
+    /// Brings one window to the front (raise it, then make its app frontmost).
+    func raise(window: UInt32, pid: Int32)
     func launch(bundleId: String) -> Bool
     func activate(bundleId: String) -> Bool
     func quit(bundleId: String) -> Bool

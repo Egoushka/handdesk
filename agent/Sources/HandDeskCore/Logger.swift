@@ -181,6 +181,7 @@ extension ClientMessage {
         case .moveWindow: return ["type": "move", "target": "window"]
         case let .buttonWindow(_, b, down, _, _): return ["type": "button", "target": "window", "button": b.rawValue, "down": down]
         case .windows: return ["type": "windows"]
+        case let .raiseWindow(w): return ["type": "raise", "window": Int(w)]
         case let .virtualDisplay(a):
             switch a {
             case let .add(w, h, _): return ["type": "virtualDisplay", "action": "add", "width": w, "height": h]
