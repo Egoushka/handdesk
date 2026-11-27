@@ -13,6 +13,7 @@ final class FakeSystem: SystemServices {
     func listWindows() -> [WindowInfo] { windows }
     func listApps() -> [AppInfo] { apps }
     func activate(pid: Int32) { events.append("activatePid \(pid)") }
+    func raise(window: UInt32, pid: Int32) { events.append("raise \(window) \(pid)") }
     func launch(bundleId: String) -> Bool { events.append("launch \(bundleId)"); return true }
     func activate(bundleId: String) -> Bool { events.append("activate \(bundleId)"); return true }
     func quit(bundleId: String) -> Bool { events.append("quit \(bundleId)"); return true }
@@ -267,6 +268,28 @@ final class MacTests {
         XCTAssertEqual(sys.events.filter { $0.hasPrefix("open ") }.count, 1)
         send(.open(id: 3)) // ids keep counting up, so the new answer starts at 3
         XCTAssertEqual(sys.events.filter { $0.hasPrefix("open ") }.count, 2)
+    }
+
+    func testRaiseDecodesAndBringsOneWindowForward() {
+        XCTAssertEqual(json(#"{"type":"raise","window":500}"#), .raiseWindow(500))
+        XCTAssertNil(json(#"{"type":"raise","window":0}"#))
+        XCTAssertNil(json(#"{"type":"raise"}"#))
+        let (_, sys, _, _, send) = makeCommands()
+        sys.windows = [win]
+        send(.raiseWindow(500))
+        send(.raiseWindow(404)) // not in the list: nothing happens
+        XCTAssertEqual(sys.events, ["raise 500 321"])
+    }
+
+    func testWindowActivatorBeatsAppActivator() {
+        let poster = FakePoster()
+        var got: [String] = []
+        let m = EventMapper(poster: poster, displays: [mainDisplay], now: { 0 })
+        m.windows = [win]
+        m.activator = { _ in got.append("app") }
+        m.windowActivator = { id, pid in got.append("window \(id) \(pid)") }
+        m.handle(.buttonWindow(window: 500, button: .left, down: true, x: 0.5, y: 0.5))
+        XCTAssertEqual(got, ["window 500 321"])
     }
 
     func testOtherMessagesAreNotHandled() {

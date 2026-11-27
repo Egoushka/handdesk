@@ -51,6 +51,7 @@ public enum ClientMessage: Equatable {
     case moveWindow(window: UInt32, x: Double, y: Double)
     case buttonWindow(window: UInt32, button: MouseButton, down: Bool, x: Double, y: Double)
     case windows
+    case raiseWindow(UInt32)
     case virtualDisplay(VirtualDisplayAction)
     case dimPhysical(Bool)
     case apps
@@ -132,6 +133,9 @@ public enum ClientMessage: Equatable {
             return .log(level: lv, message: LogScrub.clean(m, max: 256))
         case "windows":
             return .windows
+        case "raise":
+            guard let w = windowId("window") else { return nil }
+            return .raiseWindow(w)
         case "virtualDisplay":
             switch obj["action"] as? String {
             case "add":

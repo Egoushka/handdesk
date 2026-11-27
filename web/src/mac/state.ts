@@ -73,7 +73,7 @@ export class MacState {
 export type LauncherAction =
   | { kind: "send"; message: ClientMessage }
   | { kind: "window"; windowId: number }
-  | { kind: "local"; id: "close" | "addDisplay" | "dimOn" | "dimOff" | "env" | "recenter" | "save" | "kb" | "cal" | "launcher" };
+  | { kind: "local"; id: "close" | "addDisplay" | "dimOn" | "dimOff" | "env" | "recenter" | "save" | "kb" | "cal" | "launcher" | "hands" | "gestures" };
 
 export interface Row { text: string; sub?: string; action?: LauncherAction; header?: boolean }
 
@@ -81,13 +81,13 @@ export const VIRTUAL_NAME = "handdesk";
 export const isVirtual = (d: DisplayInfo): boolean => d.name.startsWith(VIRTUAL_NAME);
 
 /** The launcher's lines, top to bottom: query, spotlight results, running apps, windows, displays. */
-export function launcherRows(state: MacState, query: string): Row[] {
+export function launcherRows(state: MacState, query: string, panelIds: ReadonlySet<number> = new Set()): Row[] {
   const rows: Row[] = [{ text: query === "" ? "Type to search the Mac" : query, sub: "search", header: true }];
-  for (const r of state.results.slice(0, 5)) rows.push({ text: r.name, sub: r.kind, action: { kind: "send", message: { type: "open", id: r.id } } });
+  for (const r of state.results.slice(0, 4)) rows.push({ text: r.name, sub: r.kind, action: { kind: "send", message: { type: "open", id: r.id } } });
   rows.push({ text: "Running apps", header: true });
-  for (const a of state.apps.slice(0, 6)) rows.push({ text: a.name, sub: a.active ? "active" : "", action: { kind: "send", message: { type: "app", action: "activate", bundleId: a.bundleId } } });
-  rows.push({ text: "Windows", header: true });
-  for (const w of state.windows.slice(0, 6)) rows.push({ text: `${w.app}: ${w.title || "untitled"}`.slice(0, 44), action: { kind: "window", windowId: w.id } });
+  for (const a of state.apps.slice(0, 5)) rows.push({ text: a.name, sub: a.active ? "active" : "", action: { kind: "send", message: { type: "app", action: "activate", bundleId: a.bundleId } } });
+  rows.push({ text: "Windows", sub: state.windows.length === 0 ? "none on screen" : "tap: own panel", header: true });
+  for (const w of state.windows.slice(0, 8)) rows.push({ text: `${panelIds.has(w.id) ? "[panel] " : ""}${w.app}: ${w.title || "untitled"}`.slice(0, 44), action: { kind: "window", windowId: w.id } });
   rows.push({ text: "Displays", header: true });
   rows.push({ text: "Add virtual display", sub: "2560 x 1440", action: { kind: "local", id: "addDisplay" } });
   for (const d of state.displays.filter(isVirtual)) rows.push({ text: `Remove ${d.name} ${d.width}x${d.height}`, action: { kind: "send", message: { type: "virtualDisplay", action: "remove", id: d.id } } });

@@ -18,6 +18,9 @@ public final class MacCommands {
         switch message {
         case .windows:
             reply(windowsMessage(system.listWindows()))
+        case let .raiseWindow(id):
+            if let w = system.listWindows().first(where: { $0.id == id }) { system.raise(window: w.id, pid: w.pid) }
+            logger?.info("raise", ["window": Int(id)])
         case .apps:
             reply(appsMessage(system.listApps()))
         case let .app(action, id):

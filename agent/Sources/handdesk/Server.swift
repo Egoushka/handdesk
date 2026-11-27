@@ -99,6 +99,7 @@ final class Server {
         let m = EventMapper(poster: poster, displays: displays, magnifyMode: config.magnifyMode, invertScroll: config.invertScroll)
         m.windows = windowsCache
         m.activator = { [system] pid in system.activate(pid: pid) }
+        m.windowActivator = { [system] id, pid in system.raise(window: id, pid: pid) }
         return m
     }
     var token: String { config.token }

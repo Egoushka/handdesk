@@ -11,6 +11,7 @@ export type ClientMessage =
   | { type: "ping"; t: number }
   | { type: "log"; level: "debug" | "info" | "warn"; message: string }
   | { type: "windows" }
+  | { type: "raise"; window: number }
   | { type: "apps" }
   | { type: "app"; action: "launch" | "activate" | "quit"; bundleId: string }
   | { type: "spotlight"; query: string }

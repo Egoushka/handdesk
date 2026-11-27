@@ -1,4 +1,5 @@
 import { dist, v } from "../gesture/math";
+import { sessionInit } from "./session";
 import type { ControllerFrame, HandFrame, InputFrame, JointName, Ray, Vec3 } from "../gesture/types";
 
 export const JOINTS: JointName[] = [
@@ -19,7 +20,7 @@ export type XRMode = "immersive-ar" | "immersive-vr";
 
 export async function startSession(mode: XRMode): Promise<XRSession> {
   if (!navigator.xr) throw new Error("WebXR is not available in this browser (open the page in the Quest Browser)");
-  return navigator.xr.requestSession(mode, { requiredFeatures: [...SESSION_INIT.requiredFeatures], optionalFeatures: [...SESSION_INIT.optionalFeatures] });
+  return navigator.xr.requestSession(mode, sessionInit(mode));
 }
 
 /** Head frame: yaw-only rotation about the head position (decision D8). */

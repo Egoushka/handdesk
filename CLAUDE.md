@@ -7,3 +7,6 @@ Immersive Mac desktop on Quest 3 by hand tracking. Read `docs/specs/handdesk-v0.
 - The wire protocol lives in the spec, `web/src/protocol.ts` and `agent/Sources/HandDeskCore/Messages.swift`: change all three together. A test reads the Swift key table to prove every virtual key has a Mac key code.
 - The canvas must stay under `#ui` (z-index, pointer-events none), or a desktop click never reaches the Enter buttons.
 - Thresholds in `gesture/config.ts` and `keyboard/press.ts` are starting values; tune on the headset, not in tests.
+- Window panels spawn near the head (`space/windows.ts`) and are not part of `arrange`; the display row is the only thing recenter moves. Raising a window uses the Accessibility API (`RealSystem.raise`), synchronously, because the click right after must hit it. Probe a live agent with a Node script over `ws://localhost:8787/ws?t=<token>` (header `Origin: http://localhost:8787`), read the token from the file, never print it.
+- The v0.3 gestures live in `gesture/extra.ts` (+ `extraConfig.ts`), separate from the classifier. The test fixture hand is a right hand lying palm up; tests mirror and rotate it (`tests/v03.test.ts`).
+- Skinned hand meshes are in `web/public/hands` and served from `/hands/`; the agent's static server falls back to `application/octet-stream` for `.glb`, which three.js accepts.

@@ -14,6 +14,8 @@ public final class EventMapper {
     public var windows: [WindowInfo] = []
     /// Called with the pid of a window's app before a button press on that window: focus follows the touch.
     public var activator: ((Int32) -> Void)?
+    /// Preferred over `activator` when set: brings that one window forward (id, owner pid), not just its app.
+    public var windowActivator: ((UInt32, Int32) -> Void)?
     public var magnifyMode: MagnifyMode
     public var invertScroll: Bool
     private let poster: EventPoster
@@ -38,7 +40,7 @@ public final class EventMapper {
 
     public func handle(_ message: ClientMessage) {
         switch message {
-        case .subscribe, .ping, .log, .subscribeStreams, .windows, .virtualDisplay, .dimPhysical, .apps, .app, .spotlight, .open:
+        case .subscribe, .ping, .log, .subscribeStreams, .windows, .raiseWindow, .virtualDisplay, .dimPhysical, .apps, .app, .spotlight, .open:
             break // owned by the server
         case let .move(d, x, y):
             guard let disp = display(d) else { return }
@@ -51,7 +53,7 @@ public final class EventMapper {
             move(to: win.globalPoint(x: x, y: y))
         case let .buttonWindow(w, button, down, x, y):
             guard let win = windows.first(where: { $0.id == w }) else { return }
-            if down { activator?(win.pid) }
+            if down { if let f = windowActivator { f(win.id, win.pid) } else { activator?(win.pid) } }
             press(button, down: down, at: win.globalPoint(x: x, y: y))
         case let .scroll(dx, dy):
             let sign: Double = invertScroll ? -1 : 1
