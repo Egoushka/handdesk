@@ -1,6 +1,6 @@
 import { dist, v } from "../gesture/math";
 import { sessionInit } from "./session";
-import type { ControllerFrame, HandFrame, InputFrame, JointName, Ray, Vec3 } from "../gesture/types";
+import type { ControllerFrame, Hand, HandFrame, InputFrame, JointName, Ray, Vec3 } from "../gesture/types";
 
 export const JOINTS: JointName[] = [
   "wrist",
@@ -65,6 +65,8 @@ export interface WorldInput {
   worldHands: HandFrame[];
   /** viewer-space frame for the gesture classifier */
   frame: InputFrame;
+  /** the system's pointer ray of each hand or controller (inputSource.targetRaySpace), in world space */
+  worldRays: Partial<Record<Hand, Ray>>;
 }
 
 /** Reads hands and controllers from an XRFrame. World space for the keyboard, viewer space for the classifier. */
@@ -75,6 +77,7 @@ export function readInput(frame: XRFrame, ref: XRReferenceSpace, time: number): 
   const worldHands: HandFrame[] = [];
   const hands: HandFrame[] = [];
   const controllers: ControllerFrame[] = [];
+  const worldRays: Partial<Record<Hand, Ray>> = {};
 
   for (const src of frame.session.inputSources) {
     const side = src.handedness === "left" ? "left" : "right";
@@ -90,11 +93,13 @@ export function readInput(frame: XRFrame, ref: XRReferenceSpace, time: number): 
         joints[n] = toViewer(p, head);
       }
       const ray = rayOf(frame, src, ref);
+      if (ray) worldRays[side] = ray;
       worldHands.push({ hand: side, joints: wj, ray });
       hands.push({ hand: side, joints, ray: ray && { origin: toViewer(ray.origin, head), direction: dirToViewer(ray.direction, head) } });
     } else if (src.gamepad) {
       const grip = src.gripSpace ? frame.getPose(src.gripSpace, ref) : undefined;
       const ray = rayOf(frame, src, ref);
+      if (ray) worldRays[side] = ray;
       const position = grip ? pt(grip.transform.position) : ray?.origin;
       if (!position) continue;
       const b = src.gamepad.buttons;
@@ -112,7 +117,7 @@ export function readInput(frame: XRFrame, ref: XRReferenceSpace, time: number): 
       });
     }
   }
-  return { head, worldHands, frame: { time, hands, controllers } };
+  return { head, worldHands, frame: { time, hands, controllers }, worldRays };
 }
 
 export const fingerSpan = (h: HandFrame): number => {

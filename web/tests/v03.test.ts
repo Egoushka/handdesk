@@ -186,13 +186,14 @@ describe("window panels", () => {
     const a = windowPanel(7, { width: 1200, height: 800 }, head, 0);
     expect(a.windowId).toBe(7);
     expect(a.center.z).toBeCloseTo(2 - WINDOW_DISTANCE, 5);
-    expect(a.width).toBeCloseTo(1200 / 900, 5);
+    expect(a.width).toBeCloseTo(1.3, 5);
+    expect(a.center.y).toBeCloseTo(1.6, 5);
     expect(a.height).toBeCloseTo(a.width * (800 / 1200), 5);
     const b = windowPanel(8, { width: 1200, height: 800 }, head, 1);
     expect(b.center.x).toBeGreaterThan(a.center.x);
     const turned = windowPanel(9, { width: 300, height: 300 }, { position: { x: 0, y: 1.6, z: 0 }, yaw: Math.PI / 2 }, 0);
     expect(turned.center.x).toBeGreaterThan(1); // looking along +x
-    expect(turned.width).toBe(0.6);
+    expect(turned.width).toBe(0.9);
   });
 
   it("launcher marks windows that have a panel and says when there are none", () => {

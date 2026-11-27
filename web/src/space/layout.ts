@@ -1,6 +1,7 @@
 import type { Vec3 } from "../gesture/types";
 import type { Panel } from "../panel";
 import type { Store } from "../onboarding/palm";
+import { SPAWN_DISTANCE } from "./surface";
 
 export type EnvId = "passthrough" | "dim" | "night" | "grid";
 export const ENVIRONMENTS: { id: EnvId; label: string }[] = [
@@ -41,7 +42,7 @@ export function loadLayout(store: Store): SavedLayout | undefined {
 export interface Head { position: Vec3; yaw: number }
 
 /** Put every panel in a row in front of the head, keeping each one's size and curve. */
-export function recenterPanels<P extends Panel>(panels: P[], head: Head, distance = 1.8, drop = 0.15): P[] {
+export function recenterPanels<P extends Panel>(panels: P[], head: Head, distance = SPAWN_DISTANCE, drop = 0): P[] {
   const fx = Math.sin(head.yaw);
   const fz = -Math.cos(head.yaw);
   const rx = Math.cos(head.yaw);

@@ -8,18 +8,23 @@ import { StripSwipe } from "../keyboard/strip";
 import { editQuery, launcherRows, MacState, rowIndexAt, type Row, type ServerMessage } from "../mac/state";
 import { HintTracker } from "../onboarding/hints";
 import { PalmMenuDetector, introDone, markIntroDone } from "../onboarding/palm";
-import { CHEAT_SHEET, INTRO, Stats, statusLine, type Permissions } from "../onboarding/status";
+import { INTRO, Stats, statusLine, type Permissions } from "../onboarding/status";
 import { TrackingState } from "../hands/rig";
-import { applyGrab, pickPanel, planePoint, type Panel } from "../panel";
+import { applyGrab, pickPanel, type Panel } from "../panel";
 import { gestureToMessages, keyActionToMessages, newMapperState, type ClientMessage } from "../protocol";
 import { DirectTouch } from "../space/touch";
-import { dragHandle, handlesOf, type Handle, handlesVisible, distanceToPanel, pickHandle, type HandleKind } from "../space/handles";
+import { handlesOf, type Handle, handlesVisible, distanceToPanel } from "../space/handles";
 import { windowPanel } from "../space/windows";
 import { ExtraGestures, EXTRA_CHEAT_SHEET, type ExtraEvent } from "../gesture/extra";
+import { ArrangeDrag } from "../input/arrange";
+import { PointerRouter, type Pick, type PointerAction, type SelectEvent } from "../input/pointer";
+import { Trackpad } from "../input/trackpad";
+import { GestureLog, hudLines, strongestPinch, trackingText } from "../feedback/feedback";
+import { MODES, WristFlip, loadMode, modeInfo, nextMode, policyOf, saveMode, type Mode } from "../modes/modes";
+import { DISTANCE_STEP, SPAWN_DISTANCE, SPAWN_WIDTH, headDistance, panelInFront, withDistance } from "../space/surface";
 import { extraToMessages } from "../gesture/extraMessages";
 import { effectiveHandMode, HAND_MODES, loadHandMode, nextHandMode, saveHandMode, type HandMode } from "../hands/mode";
 import { SkinnedHands } from "../hands/skin";
-import { inTitleBand, titleDragCenter } from "../space/titledrag";
 import { sessionInit } from "./session";
 import { ENVIRONMENTS, isVr, loadLayout, nextEnvironment, recenterPanels, saveLayout, type EnvId } from "../space/layout";
 import { Connection } from "./connection";
@@ -34,6 +39,7 @@ import { snipHandles } from "../snip/handles";
 import { loadSnips, saveSnips, type SnipRecord } from "../snip/store";
 import { SelectionOverlay, SnipView } from "../snip/view";
 import { Billboard, HandleDots, HandsView, KeyboardView, PanelView, TouchDots, UiPanel, clickSound, makeEnvironments } from "./world";
+import { CursorViews, HoverFrame, Ripples, TextBoard, tickSound } from "./feedbackView";
 
 const $ = <T extends HTMLElement>(id: string) => document.getElementById(id) as T;
 const statusEl = $("status");
@@ -60,6 +66,12 @@ scene.add(glove.group, shadows.group, selection.group);
 const handleDots = new HandleDots();
 const touchDots = new TouchDots();
 scene.add(handleDots.mesh, touchDots.mesh);
+const hoverFrame = new HoverFrame();
+const cursorViews = new CursorViews();
+const ripples = new Ripples();
+const hud = new TextBoard(0.22, 4, 40);
+const logBoard = new TextBoard(0.3, 11, 34);
+scene.add(hoverFrame.group, cursorViews.group, ripples.group, hud.mesh, logBoard.mesh);
 const rayLines = new Map<Hand, THREE.Line>();
 for (const h of ["left", "right"] as Hand[]) {
   const l = new THREE.Line(new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(), new THREE.Vector3(0, 0, -1)]), new THREE.LineBasicMaterial({ color: 0x93c5fd, transparent: true, opacity: 0.6 }));
@@ -150,8 +162,8 @@ function syncDisplays(n: number, list: { name: string; width: number; height: nu
   while (displayViews.length > n) { const v = displayViews.pop()!; scene.remove(v.mesh); }
   list.forEach((d, i) => {
     if (displayViews[i]) return;
-    const width = 2.4;
-    const panel: Panel = { display: i, center: { x: i * (width + 0.1), y: 1.45, z: -1.8 }, yaw: 0, width, height: width * (d.height / d.width), curve: 0.5 };
+    const width = SPAWN_WIDTH;
+    const panel: Panel = { display: i, center: { x: i * (width + 0.1), y: 1.6, z: -SPAWN_DISTANCE }, yaw: 0, width, height: width * (d.height / d.width), curve: 0.5 };
     const v = new PanelView(panel, d.pixelWidth, d.pixelHeight, d.name || `Display ${i + 1}`);
     displayViews.push(v);
     scene.add(v.mesh);
@@ -186,11 +198,53 @@ function arrange(head: HeadFrame): void {
   recenterPanels(views.map((v) => v.panel), head).forEach((p, i) => { views[i]!.panel = p; views[i]!.sync(); });
 }
 
+// ---- modes and feedback ----
+let mode: Mode = loadMode(localStorage);
+const policy = () => policyOf(mode);
+const kbOn = (): boolean => policy().keyboard || launcher.visible;
+const router = new PointerRouter();
+const trackpad = new Trackpad();
+const arrangeDrag = new ArrangeDrag();
+const wristFlip = new WristFlip();
+const gestureLog = new GestureLog(10);
+const selQueue: SelectEvent[] = [];
+let lastNote: { name: string; hand?: Hand; time: number } | undefined;
+let showLog = false;
+let lastHud = 0;
+let selSnip: Hand | undefined;
+let dragView: Placed | undefined;
+let gestureLogged = 0;
+
+function note(name: string, time: number, hand?: Hand): void {
+  gestureLog.add(name, time, hand);
+  lastNote = { name, hand, time };
+  if (time - gestureLogged > 250) { gestureLogged = time; log("debug", `gesture ${name}`); }
+}
+
+function setMode(m: Mode, time: number): void {
+  if (m === mode) return;
+  mode = m;
+  saveMode(localStorage, m);
+  classifier.reset();
+  extra.reset();
+  router.reset();
+  trackpad.reset();
+  arrangeDrag.end();
+  dragView = undefined;
+  note(`mode: ${modeInfo(m).label}`, time);
+  if (audio) tickSound(audio);
+  log("info", `mode ${m}`);
+}
+
+/** A hit is in source coordinates; a snip draws it in its own. */
+const localUv = (p: Panel, x: number, y: number): { x: number; y: number } => (p.crop ? fromSource(p.crop, x, y) : { x, y });
+const keyOf = (p: Panel): string => (p.windowId === undefined ? `d${p.display}` : `w${p.windowId}`) + (p.crop ? `c${p.crop.x0.toFixed(4)},${p.crop.y0.toFixed(4)},${p.crop.x1.toFixed(4)},${p.crop.y1.toFixed(4)}` : "");
+const viewByKey = (k: string): Placed | undefined => allViews().find((v) => keyOf(v.panel) === k);
+
 // ---- typing state ----
 const session = new TypingSession();
 const detector = new PressDetector(POKE);
 let pokeMode = true;
-let keyboardOn = true;
 let plane: TypingPlane = planeFromYaw({ x: 0, y: 0.95, z: -0.5 }, 0);
 const keyboardView = new KeyboardView(session.keys);
 scene.add(keyboardView.mesh);
@@ -214,23 +268,28 @@ function applyHandMode(): void {
 }
 
 // ---- menu ----
-const SNIP_CHEAT = "Thumb and ring, drag: cut a region out (snip)";
 const menuRows = (): Row[] => [
-  { text: "handdesk", sub: "cheat sheet", header: true },
-  ...[...CHEAT_SHEET, SNIP_CHEAT].map((t) => ({ text: t, header: true })),
+  { text: "Mode (or flip your left wrist)", header: true },
+  ...MODES.map((m) => ({ text: `${m.id === mode ? "\u25cf" : "\u25cb"} ${m.label}`, sub: m.hint, action: { kind: "local" as const, id: `mode:${m.id}` as const } })),
   { text: `Environment: ${ENVIRONMENTS.find((e) => e.id === env)!.label}`, action: { kind: "local", id: "env" } },
   { text: "Recenter", action: { kind: "local", id: "recenter" } },
   { text: "Save layout", action: { kind: "local", id: "save" } },
-  { text: keyboardOn ? "Keyboard: on" : "Keyboard: off", action: { kind: "local", id: "kb" } },
   { text: calibrating ? "Hands flat on the desk..." : pokeMode ? "Find desk (hands flat)" : "Desk set: find again", action: { kind: "local", id: "cal" } },
   { text: "Launcher", action: { kind: "local", id: "launcher" } },
-  { text: snipMode ? "Snip: pinch-drag a rectangle..." : "Snip a region", action: { kind: "local", id: "snipDraw" } },
+  { text: snipMode ? "Snip: pinch-drag a rectangle..." : "Snip a region", sub: "or thumb and ring, drag", action: { kind: "local", id: "snipDraw" } },
   { text: `Snips (${snips.length})`, action: { kind: "local", id: "snipList" } },
   { text: `Hands: ${HAND_MODES.find((m) => m.id === handMode)!.label}`, action: { kind: "local", id: "hands" } },
   { text: "More gestures", action: { kind: "local", id: "gestures" } },
+  { text: "Panels closer", action: { kind: "local", id: "closer" } },
+  { text: "Panels farther", action: { kind: "local", id: "farther" } },
+  { text: showLog ? "Gesture log: on" : "Gesture log: off", action: { kind: "local", id: "log" } },
 ];
 function localAction(id: string, time: number): void {
-  if (id === "env") { env = nextEnvironment(env); envs.set(env); localStorage.setItem("handdesk.env", env); applyHandMode(); }
+  if (id.startsWith("mode:")) setMode(id.slice(5) as Mode, time);
+  else if (id === "closer" || id === "farther") {
+    for (const v of sourceViews()) { v.panel = withDistance(v.panel, lastHead.position, headDistance(v.panel, lastHead.position) + (id === "closer" ? -DISTANCE_STEP : DISTANCE_STEP)); v.sync(); }
+  } else if (id === "log") showLog = !showLog;
+  else if (id === "env") { env = nextEnvironment(env); envs.set(env); localStorage.setItem("handdesk.env", env); applyHandMode(); }
   else if (id === "recenter") arrange(lastHead);
   else if (id === "save") {
     saveLayout(localStorage, {
@@ -240,7 +299,7 @@ function localAction(id: string, time: number): void {
       keyboard: pokeMode ? undefined : { origin: plane.origin, yaw: Math.atan2(-plane.uAxis.z, plane.uAxis.x) },
     });
     log("info", "layout saved");
-  } else if (id === "kb") { keyboardOn = !keyboardOn; keyboardView.mesh.visible = keyboardOn; }
+  }
   else if (id === "cal") calibrating = { until: time + 2500, planes: [] };
   else if (id === "launcher") { launcher.show(!launcher.visible); launcherFocused = launcher.visible; if (launcher.visible) { conn.send({ type: "windows" }); conn.send({ type: "apps" }); placeUi(launcher, lastHead, -0.55, 1.1); } }
   else if (id === "hands") { handSaved = nextHandMode(handMode); saveHandMode(localStorage, handSaved); applyHandMode(); }
@@ -289,20 +348,15 @@ const mapperState = newMapperState();
 let activePanel: Panel | undefined;
 let grabStart: Panel | undefined;
 let grabView: Placed | undefined;
-let handleDrag: { view: Placed; kind: HandleKind; start: Panel; from: Vec3 } | undefined;
-let uiSwallow = false;
 let snipMode = false;
 let snipDraw: { view: PanelView; a: { x: number; y: number }; b: { x: number; y: number } } | undefined;
 let snipSeq = 0;
 const snipPinch = new SnipPinch();
 const pendingSnips: SnipRecord[] = loadSnips(localStorage);
 let snipSig = "";
-let titleDrag: { view: Placed; start: Panel; from: Vec3 } | undefined;
 const extra = new ExtraGestures();
-const fistState = newMapperState();
 let spread: { view: Placed; start: Panel } | undefined;
 const touchCursor = new Map<string, { display: number; window?: number; x: number; y: number }>();
-let lastGestureLog = 0;
 
 const TIPS = [["thumb", "thumb-tip"], ["index", "index-finger-tip"], ["middle", "middle-finger-tip"], ["ring", "ring-finger-tip"], ["pinky", "pinky-finger-tip"]] as const;
 
@@ -317,6 +371,7 @@ function clickUi(u: UiPanel, y: number, time: number): void {
   if (u.id === "launcher") launcherFocused = true;
   const a = row?.action;
   if (!a) return;
+  note(`menu: ${row!.text.replace(/^[\u25cf\u25cb] /, "")}`, time);
   if (a.kind === "local") localAction(a.id, time);
   else if (a.kind === "send") conn.send(a.message);
   else { if (windowViews.has(a.windowId)) removeWindowPanel(a.windowId); else addWindowPanel(a.windowId); }
@@ -326,6 +381,66 @@ const hitFn = (head: HeadFrame) => (ray: Ray) => {
   const h = pickPanel(rayToWorld(ray, head), macPanels());
   return h ? { display: h.hit.display, window: h.hit.window, x: h.hit.x, y: h.hit.y } : undefined;
 };
+
+/** Nearest thing a world-space ray hits: a page UI panel or a Mac panel. */
+function pickAll(ray: Ray): Pick | undefined {
+  const ui = pickPanelUi(ray);
+  const mac = pickPanel(ray, macPanels());
+  if (ui && (!mac || ui.t <= mac.hit.t)) return { key: ui.u.id, ui: ui.u.id, display: -1, x: 0.5, y: ui.y, width: ui.u.panel.width, height: ui.u.panel.height, t: ui.t };
+  if (!mac) return undefined;
+  return { key: keyOf(mac.panel), display: mac.hit.display, window: mac.hit.window, x: mac.hit.x, y: mac.hit.y, width: mac.panel.width, height: mac.panel.height, t: mac.hit.t };
+}
+
+const handPoint = (hands: HandFrame[], hand: Hand): Vec3 | undefined => {
+  const h = hands.find((x) => x.hand === hand);
+  const a = h?.joints["thumb-tip"], b = h?.joints["index-finger-tip"];
+  return a && b ? { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, z: (a.z + b.z) / 2 } : h?.joints.wrist;
+};
+
+/** What the pointer router decided: UI clicks, Mac messages (with the click ripple and tick), and panel moves in Arrange. */
+function handleAction(a: PointerAction, head: HeadFrame, world: HandFrame[], time: number): void {
+  if (a.type === "hover") {
+    if (a.pick?.ui) { const u = uiPanels.find((x) => x.id === a.pick!.ui); if (u) uiHover = { id: u.id, row: rowIndexAt(a.pick.y, u.slots()), t: time }; }
+    return;
+  }
+  if (a.type === "ui") {
+    const u = uiPanels.find((x) => x.id === a.id);
+    if (u) { uiHover = { id: u.id, row: rowIndexAt(a.y, u.slots()), t: time }; clickUi(u, a.y, time); }
+    return;
+  }
+  if (a.type === "send") {
+    for (const m of a.messages) conn.send(m);
+    if (a.gesture) { note(a.gesture, time, a.hand); if (a.gesture !== "scroll") launcherFocused = false; }
+    const v = a.at && viewByKey(a.at.key);
+    if (a.at) { activePanel = v?.panel ?? activePanel; }
+    if (a.ripple && a.at && v) { ripples.add({ ...localUv(v.panel, a.at.x, a.at.y), key: a.at.key, start: time }, v.panel); if (audio) tickSound(audio); }
+    return;
+  }
+  // arrange
+  if (a.kind === "squeeze") {
+    if (a.phase !== "start" || !a.pick) return;
+    const v = viewByKey(a.pick.key);
+    if (v) { v.panel = panelInFront(v.panel, head); v.sync(); activePanel = v.panel; note("snap panel in front", time, a.hand); }
+    return;
+  }
+  if (a.phase === "start" && a.ray) {
+    const grabbed = arrangeDrag.start(a.ray, macPanels(), handPoint(world, a.hand), head.position, (p) => {
+      const sn = allViews().find((v) => v.panel === p);
+      return sn instanceof SnipView ? snipHandles(p, sn.pinned) : handlesOf(p);
+    }, (p, kind) => {
+      const sn = allViews().find((v) => v.panel === p);
+      if (!(sn instanceof SnipView)) return false;
+      if (kind === "pin") sn.setPinned(!sn.pinned); else dropSnip(sn);
+      persistSnips(true);
+      return true;
+    });
+    dragView = grabbed && allViews().find((v) => v.panel === grabbed);
+    if (grabbed) { activePanel = grabbed; note("grab panel", time, a.hand); }
+  } else if (a.phase === "move" && a.ray && dragView) {
+    const next = arrangeDrag.move(a.ray, handPoint(world, a.hand), head.position);
+    if (next) { dragView.panel = next; dragView.sync(); activePanel = next; }
+  } else if (a.phase === "end") { arrangeDrag.end(); dragView = undefined; }
+}
 
 function snipDrag(phase: "start" | "move" | "end", ray: Ray): void {
   const srcs = sourceViews();
@@ -385,101 +500,39 @@ function snipRows(): Row[] {
   return rows;
 }
 
+/** Two-hand grab (Arrange and Real devices only); scroll, zoom and swipe go to the Mac in the other modes. */
 function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
-  if (ev.type === "grab-start") { activePanel ??= macPanels()[0]; grabView = allViews().find((v) => v.panel === activePanel) ?? allViews()[0]; grabStart = grabView?.panel; if (grabView instanceof SnipView && grabView.pinned) { grabView = undefined; grabStart = undefined; } return; }
+  if (ev.type === "grab-start") { activePanel ??= macPanels()[0]; grabView = allViews().find((v) => v.panel === activePanel) ?? allViews()[0]; grabStart = grabView?.panel; if (grabView instanceof SnipView && grabView.pinned) { grabView = undefined; grabStart = undefined; } note("two-hand grab", time); return; }
   if (ev.type === "grab-move") {
     if (grabView && grabStart) { grabView.panel = applyGrab(grabStart, dirToWorld(ev.center, head), ev.scale, ev.yaw); grabView.sync(); }
     return;
   }
   if (ev.type === "grab-end") { grabStart = undefined; grabView = undefined; return; }
-
-  if ((snipMode || snipDraw) && "ray" in ev) {
-    const ray = rayToWorld(ev.ray, head);
-    if (ev.type === "drag-start" && snipMode && !pickPanelUi(ray)) { snipDrag("start", ray); return; }
-    if (snipDraw && ev.type === "drag-move") { snipDrag("move", ray); return; }
-    if (snipDraw && ev.type === "drag-end") { snipDrag("end", ray); return; }
-    if (snipMode && !snipDraw && ev.type === "click" && !pickPanelUi(ray)) { snipMode = false; return; }
-  }
-
-  if (ev.type === "drag-move" && titleDrag) {
-    const to = planePoint(rayToWorld(ev.ray, head), titleDrag.start);
-    if (to) { titleDrag.view.panel = { ...titleDrag.start, center: titleDragCenter(titleDrag.start, titleDrag.from, to) }; titleDrag.view.sync(); }
-    return;
-  }
-  if (ev.type === "drag-end" && titleDrag) { titleDrag = undefined; return; }
-  if (ev.type === "drag-move" && handleDrag) {
-    const to = planePoint(rayToWorld(ev.ray, head), handleDrag.start);
-    if (to) { handleDrag.view.panel = { ...dragHandle(handleDrag.start, handleDrag.kind, handleDrag.from, to), ...(handleDrag.start.crop ? { curve: 0 } : {}) }; handleDrag.view.sync(); }
-    return;
-  }
-  if (ev.type === "drag-end" && handleDrag) { handleDrag = undefined; return; }
-  if ((ev.type === "drag-move" || ev.type === "drag-end") && uiSwallow) { if (ev.type === "drag-end") uiSwallow = false; return; }
-
-  if ("ray" in ev && ev.type !== "drag-move" && ev.type !== "drag-end") {
-    const ray = rayToWorld(ev.ray, head);
-    const ui = pickPanelUi(ray);
-    if (ui) {
-      uiHover = { id: ui.u.id, row: rowIndexAt(ui.y, ui.u.slots()), t: time };
-      if (ev.type === "click" && ev.button === "left") clickUi(ui.u, ui.y, time);
-      if (ev.type === "drag-start") uiSwallow = true;
-      return;
-    }
-    uiHover = undefined;
-    if (ev.type === "click" && intro.visible) { intro.show(false); markIntroDone(localStorage); }
-    if (ev.type === "click" || ev.type === "drag-start") launcherFocused = false;
-    if (ev.type === "drag-start") {
-      for (const v of allViews()) {
-        if (!handlePanelVisible(v.panel)) continue;
-        const sn = v instanceof SnipView ? v : undefined;
-        const h = pickHandle(ray, v.panel, 0.07, sn ? snipHandles(v.panel, sn.pinned) : undefined);
-        if (sn && h?.kind === "pin") { sn.setPinned(!sn.pinned); persistSnips(true); return; }
-        if (sn && h?.kind === "close") { dropSnip(sn); persistSnips(true); return; }
-        const from = h && planePoint(ray, v.panel);
-        if (h && from) { handleDrag = { view: v, kind: h.kind as HandleKind, start: v.panel, from }; return; }
-      }
-    }
-    const hit = pickPanel(ray, macPanels());
-    if (ev.type === "drag-start" && hit && !hit.panel.crop && inTitleBand(hit.hit.y)) {
-      const view = allViews().find((v) => v.panel === hit.panel);
-      const from = planePoint(ray, hit.panel);
-      if (view && from) { titleDrag = { view, start: view.panel, from }; activePanel = hit.panel; log("info", "gesture title-move"); return; }
-    }
-    if (hit) {
-      activePanel = hit.panel;
-      if (ev.type === "point") setRay(ev.hand, ray, hit.hit.t);
-    } else if (ev.type === "point") rayLines.get(ev.hand)!.visible = false;
-  }
-  if (ev.type !== "point" && ev.type !== "drag-move" && ev.type !== "scroll" && ev.type !== "magnify" && time - lastGestureLog > 250) { lastGestureLog = time; log("debug", `gesture ${ev.type}`); }
+  if (ev.type !== "scroll" && ev.type !== "magnify") note(ev.type, time, "hand" in ev ? ev.hand : undefined);
   for (const m of gestureToMessages(ev, hitFn(head), mapperState)) conn.send(m);
 }
 
-/** The v0.3 gestures: shortcuts go straight out; fist drag reuses the pinch-drag mapping; spread scales the panel in the gaze. */
-function handleExtra(ev: ExtraEvent, head: HeadFrame): void {
-  if (ev.type === "fist-start" || ev.type === "fist-move" || ev.type === "fist-end") {
-    if (!ev.ray) return;
-    const kind = ev.type === "fist-start" ? "drag-start" : ev.type === "fist-move" ? "drag-move" : "drag-end";
-    for (const m of gestureToMessages({ type: kind, hand: ev.hand, source: "hand", ray: ev.ray }, hitFn(head), fistState)) conn.send(m);
-    if (ev.type === "fist-start") log("info", "gesture fist-drag");
-    return;
-  }
+/** The v0.3 gestures: shortcuts go straight out; spread scales the panel in the gaze. Fist drag is gone: the select ray drags now. */
+function handleExtra(ev: ExtraEvent, head: HeadFrame, time: number): void {
+  if (ev.type === "fist-start" || ev.type === "fist-move" || ev.type === "fist-end") return;
   if (ev.type === "spread") {
     if (!spread) {
       const gaze = pickPanel({ origin: head.position, direction: { x: Math.sin(head.yaw), y: 0, z: -Math.cos(head.yaw) } }, macPanels());
       const view = gaze && allViews().find((v) => v.panel === gaze.panel);
       if (!view) return;
       spread = { view, start: view.panel };
-      log("info", "gesture spread");
+      note("spread resize", time);
     }
     spread.view.panel = applyGrab(spread.start, { x: 0, y: 0, z: 0 }, ev.scale, 0);
     spread.view.sync();
     return;
   }
   if (ev.type === "spread-end") { spread = undefined; return; }
-  log("info", `gesture ${ev.type}`);
+  note(ev.type, time);
   for (const m of extraToMessages(ev)) conn.send(m);
 }
 
-function pickPanelUi(ray: Ray): { u: UiPanel; y: number } | undefined {
+function pickPanelUi(ray: Ray): { u: UiPanel; y: number; t: number } | undefined {
   let best: { u: UiPanel; y: number; t: number } | undefined;
   for (const u of visibleUi()) {
     const h = pickPanel(ray, [u.panel]);
@@ -498,13 +551,13 @@ function setRay(hand: Hand, ray: Ray, t: number): void {
 
 let pointedHandPos: Vec3[] = [];
 function handlePanelVisible(p: Panel): boolean {
-  return pointedHandPos.some((pt) => handlesVisible(pt, p)) || p === activePanel;
+  return policy().arrange || pointedHandPos.some((pt) => handlesVisible(pt, p)) || p === activePanel;
 }
 
 // ---- keyboard ----
 function typing(hands: HandFrame[]): Set<string> {
   const typists = new Set<string>();
-  if (!keyboardOn) return typists;
+  if (!kbOn()) return typists;
   const strip = keyboardView.stripRect();
   for (const h of hands) {
     for (const [, joint] of TIPS) {
@@ -583,7 +636,8 @@ function onFrame(time: number, xrFrame?: XRFrame): void {
     const input = ref && readInput(xrFrame, ref as XRReferenceSpace, time);
     if (input) frame(input, time);
   }
-  if (keyboardOn) {
+  keyboardView.mesh.visible = kbOn();
+  if (kbOn()) {
     keyboardView.place(plane);
     keyboardView.draw({ keys: session.keys, lang: session.lang, mod: (x) => session.modifierState(x), pressed, suggestions: launcherFocused && launcher.visible ? [] : session.suggestions(), poke: pokeMode, now: time });
   }
@@ -610,6 +664,8 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   if (tracking.lost) { lostBar.setText("Hands not tracked: bring them into view"); lostBar.place({ x: head.position.x + Math.sin(head.yaw) * 0.8, y: head.position.y - 0.1, z: head.position.z - Math.cos(head.yaw) * 0.8 }, camera); }
 
   calibrate(input.worldHands, time);
+  if (!tracking.lost && wristFlip.update(time, input.frame.hands)) setMode(nextMode(mode), time);
+  const pol = policy();
 
   // palm-up menu follows the left hand
   const open = palm.update(time, input.frame.hands);
@@ -630,7 +686,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   // direct touch: the index finger of hands not typing
   const typists = typing(input.worldHands);
   const tips = input.worldHands.filter((h) => !typists.has(h.hand)).flatMap((h) => (h.joints["index-finger-tip"] ? [{ id: `${h.hand}-touch`, pos: h.joints["index-finger-tip"]! }] : []));
-  const touchPanels = [...visibleUi().map((u) => Object.assign({}, u.panel, { uiId: u.id })), ...macPanels()];
+  const touchPanels = [...visibleUi().map((u) => Object.assign({}, u.panel, { uiId: u.id })), ...(pol.touch ? macPanels() : [])];
   const touching = new Set<string>();
   const dots: { pos: Vec3; yaw: number; down: boolean }[] = [];
   for (const e of touch.update(tips, touchPanels, head.position)) {
@@ -643,7 +699,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
       continue;
     }
     const cur = { display: e.panel.display, window: e.panel.windowId, x: e.x, y: e.y };
-    if (e.type === "down") { touchCursor.set(e.id, cur); activePanel = e.panel; launcherFocused = false; sendCursor("move", cur); conn.send(button(cur, true)); }
+    if (e.type === "down") { note("touch tap", time, e.id.startsWith("left") ? "left" : "right"); touchCursor.set(e.id, cur); activePanel = e.panel; launcherFocused = false; sendCursor("move", cur); conn.send(button(cur, true)); }
     else if (e.type === "move") { touchCursor.set(e.id, cur); sendCursor("move", cur); }
     else if (e.type === "up") { const c = touchCursor.get(e.id); touchCursor.delete(e.id); if (c) conn.send(button(c, false)); }
   }
@@ -654,13 +710,77 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   if (!tracking.lost) for (const ev of snipPinch.update(input.frame.hands.filter((h) => !typists.has(h.hand) && !touching.has(h.hand)))) snipDrag(ev.type === "snip-start" ? "start" : ev.type === "snip-move" ? "move" : "end", rayToWorld(ev.ray, head));
   const snipping = snipPinch.holding();
   const frameIn = { ...input.frame, hands: tracking.lost ? [] : input.frame.hands.filter((h) => !typists.has(h.hand) && !touching.has(h.hand) && !snipping.has(h.hand)) };
-  for (const ev of classifier.update(frameIn)) handleGesture(ev, head, time);
-  for (const ev of extra.update(frameIn)) handleExtra(ev, head);
-  if (keyboardOn && !tracking.lost) handleKeyboard(input.worldHands, time);
+  // raw pinch clicks and drags are not used: the system select ray and the modes decide what a click is
+  for (const ev of classifier.update(frameIn)) {
+    if (ev.type === "grab-start" || ev.type === "grab-move" || ev.type === "grab-end") { if (pol.arrange) handleGesture(ev, head, time); }
+    else if (ev.type === "scroll" || ev.type === "magnify" || ev.type === "swipe" || ev.type === "mission-control") { if (pol.shortcuts) handleGesture(ev, head, time); }
+  }
+  for (const ev of extra.update(frameIn)) {
+    if (ev.type === "spread" || ev.type === "spread-end") { if (pol.arrange) handleExtra(ev, head, time); }
+    else if (pol.shortcuts) handleExtra(ev, head, time);
+  }
+
+  // the select ray and its events: clicks, drags, menu, arranging
+  const selected = selQueue.splice(0);
+  const rays = tracking.lost ? {} : input.worldRays;
+  let routed = selected;
+  if (snipMode || selSnip) {
+    // while snipping, the select ray draws the rectangle; UI clicks still go through
+    routed = [];
+    for (const e of selected) {
+      const r = rays[e.hand];
+      if (e.type === "selectstart" && snipMode && !snipDraw && r && !pickPanelUi(r)) { snipDrag("start", r); if (snipDraw) selSnip = e.hand; }
+      else if (e.type === "selectend" && selSnip === e.hand) { snipDrag("end", r ?? { origin: lastHead.position, direction: { x: 0, y: 0, z: -1 } }); selSnip = undefined; }
+      else routed.push(e);
+    }
+    const sr = selSnip && rays[selSnip];
+    if (sr && snipDraw) snipDrag("move", sr);
+    if (!snipDraw) selSnip = undefined;
+  }
+  const hovers = new Map<Hand, Pick | undefined>();
+  const actions = router.update(time, rays, routed, pickAll, pol);
+  for (const a of actions) { if (a.type === "hover") hovers.set(a.hand, a.pick); handleAction(a, head, input.worldHands, time); }
+  if (pol.trackpad) {
+    if (!trackpad.busy) { const ap = activePanel ?? macPanels()[0]; trackpad.retarget(ap && { key: keyOf(ap), display: ap.display, window: ap.windowId, width: ap.width, height: ap.height }); }
+    const tips: Partial<Record<Hand, Vec3>> = {};
+    for (const h of ["left", "right"] as Hand[]) tips[h] = handPoint(input.worldHands, h);
+    for (const a of trackpad.update(time, tips, head.yaw, routed)) handleAction(a, head, input.worldHands, time);
+  }
+  for (const h of ["left", "right"] as Hand[]) {
+    const pk = hovers.get(h);
+    const ray = rays[h];
+    if (pk && !pk.ui && !trackpad.busy) { const v = viewByKey(pk.key); if (v && !router.holding(h)) activePanel = v.panel; }
+    if (ray && pk && !pk.ui && (pol.ray || pol.trackpad || pol.arrange)) setRay(h, ray, pk.t);
+  }
+  if (kbOn() && !tracking.lost) handleKeyboard(input.worldHands, time);
+
+  if (kbOn() && !tracking.lost) handleKeyboard(input.worldHands, time);
 
   // controllers: B held for a second recenters
   const b = input.frame.controllers.some((c) => c.buttonB);
   if (b) { holdB ??= time; if (time - holdB > 1000) { arrange(head); holdB = Infinity; } } else holdB = undefined;
+
+  // feedback: hover outline, the Mac cursor at the aim point, click ripples
+  const aimed = (h: Hand): Pick | undefined => { const p = hovers.get(h); return p && !p.ui ? p : undefined; };
+  const hoverPick = tracking.lost ? undefined : (aimed("right") ?? aimed("left"));
+  hoverFrame.show(hoverPick && (pol.ray || pol.trackpad || pol.arrange) ? viewByKey(hoverPick.key)?.panel : undefined);
+  (["left", "right"] as Hand[]).forEach((h, i) => {
+    const pk = pol.trackpad ? (h === "right" ? trackpad.pick : undefined) : pol.ray ? hovers.get(h) : undefined;
+    const v = pk && !pk.ui && viewByKey(pk.key);
+    cursorViews.set(i, v && pk ? { panel: v.panel, ...localUv(v.panel, pk.x, pk.y) } : undefined);
+  });
+  ripples.update(time);
+  const leftWrist = input.worldHands.find((h) => h.hand === "left")?.joints.wrist;
+  if (time - lastHud > 90) {
+    lastHud = time;
+    hud.setLines(hudLines({ mode, last: lastNote, pinch: strongestPinch(input.frame.hands), tracking: trackingText(tracking.lost, input.frame.hands), now: time }));
+    logBoard.setLines(["Gestures (newest first)", ...gestureLog.lines(time)]);
+  }
+  hud.mesh.visible = !menu.visible;
+  logBoard.mesh.visible = showLog;
+  const fx = Math.sin(head.yaw), fz = -Math.cos(head.yaw), rx = Math.cos(head.yaw), rz = Math.sin(head.yaw);
+  hud.place(leftWrist && !tracking.lost ? { x: leftWrist.x, y: leftWrist.y + 0.12, z: leftWrist.z } : { x: head.position.x + fx * 0.7 - rx * 0.28, y: head.position.y - 0.28, z: head.position.z + fz * 0.7 - rz * 0.28 }, camera);
+  logBoard.place({ x: head.position.x + fx * 0.8 + rx * 0.42, y: head.position.y - 0.2, z: head.position.z + fz * 0.8 + rz * 0.42 }, camera);
 
   // visuals
   const panelsNow = [...macPanels(), ...visibleUi().map((u) => u.panel)];
@@ -668,7 +788,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
     const p = h.joints[joint as "index-finger-tip"];
     if (!p) return 0;
     let d = Math.min(...panelsNow.map((pn) => distanceToPanel(p, pn)), 1);
-    if (keyboardOn) { const c = toPlane(p, plane); if (Math.abs(c.u) < keyboardView.width / 2 && Math.abs(c.v) < keyboardView.height / 2) d = Math.min(d, Math.max(0, c.h)); }
+    if (kbOn()) { const c = toPlane(p, plane); if (Math.abs(c.u) < keyboardView.width / 2 && Math.abs(c.v) < keyboardView.height / 2) d = Math.min(d, Math.max(0, c.h)); }
     return Math.max(0, 1 - d / 0.05);
   });
   if (handMode === "virtual") {
@@ -678,14 +798,14 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
       const p = h.joints[joint as "index-finger-tip"];
       if (!p) return 0;
       let d = Math.min(...panelList.map((pn) => distanceToPanel(p, pn)), 1);
-      if (keyboardOn) { const c = toPlane(p, plane); if (Math.abs(c.u) < keyboardView.width / 2 && Math.abs(c.v) < keyboardView.height / 2) d = Math.min(d, Math.max(0, c.h)); }
+      if (kbOn()) { const c = toPlane(p, plane); if (Math.abs(c.u) < keyboardView.width / 2 && Math.abs(c.v) < keyboardView.height / 2) d = Math.min(d, Math.max(0, c.h)); }
       return Math.max(0, 1 - d / 0.05);
     });
     const pts = held.flatMap(({ frame, alpha }) => [["middle-finger-metacarpal", 0.05], ["thumb-tip", 0.014], ["index-finger-tip", 0.014], ["middle-finger-tip", 0.014], ["ring-finger-tip", 0.014], ["pinky-finger-tip", 0.014]].flatMap(([n, size]) => { const p = frame.joints[n as "wrist"]; return p ? [{ pos: p, size: size as number, weight: alpha }] : []; }));
     shadows.set(hoverShadows(pts, panelList).map((sh) => { const pt = panelPoint(panelList[sh.panel]!, sh.u, sh.v, 0.003); return { pos: pt.pos, yaw: pt.yaw, alpha: sh.alpha, radius: sh.radius }; }));
   }
   const shown: Handle[] = [];
-  for (const v of allViews()) if (handlePanelVisible(v.panel)) shown.push(...(v instanceof SnipView ? snipHandles(v.panel, v.pinned) : handlesOf(v.panel)));
+  if (pol.arrange) for (const v of allViews()) if (handlePanelVisible(v.panel)) shown.push(...(v instanceof SnipView ? snipHandles(v.panel, v.pinned) : handlesOf(v.panel)));
   handleDots.set(shown);
   for (const l of rayLines.values()) if (l.visible && performance.now() - ((l.userData as { seen?: number }).seen ?? 0) > 200) l.visible = false;
 
@@ -722,8 +842,14 @@ async function begin(s: XRSession, mode: XRMode): Promise<void> {
   classifier.reset();
   extra.reset();
   detector.reset();
+  router.reset();
+  trackpad.reset();
+  selQueue.length = 0;
   if (mode === "immersive-vr" && !isVr(env)) { env = "grid"; envs.set(env); }
   s.addEventListener("end", () => { renderer.setAnimationLoop(null); setStatus("Session ended"); $("ui").style.display = "flex"; log("info", "xr session ended"); });
+  for (const type of ["selectstart", "selectend", "squeezestart", "squeezeend"] as const) {
+    s.addEventListener(type, (e) => selQueue.push({ type, hand: (e as XRInputSourceEvent).inputSource.handedness === "left" ? "left" : "right" }));
+  }
   await renderer.xr.setSession(s);
   applyHandMode();
   renderer.setAnimationLoop(onFrame);

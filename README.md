@@ -75,6 +75,21 @@ A prebuilt Mac package (agent plus page) is attached to each [release](https://g
 
 Without `adb`, `--lan --tls-p12 FILE` serves HTTPS on the local network with a certificate you provide for a name that resolves to the Mac. The reasons are in [docs/decisions.md](docs/decisions.md) (D1).
 
+## Modes
+
+Pick a mode from the left palm-up menu, or flip your left wrist (palm down, up, down) to go to the next one. The box by your left hand shows the mode, the last gesture it recognised, your pinch strength and the tracking state; the menu can also show a log of the last 10 gestures.
+
+| Mode | What your hands do |
+|---|---|
+| Point | aim at a panel, pinch to click, hold and move to drag, squeeze to right-click |
+| Touch | poke a panel within reach |
+| Trackpad | right hand pinch-moves the cursor (short pinch taps, still hold grabs, squeeze right-clicks); left hand pinch up and down scrolls |
+| Type | keyboard on, point and pinch as in Point |
+| Arrange | pinch a panel to move it (pull the hand in to bring it closer), pinch a corner to resize, squeeze to snap it in front |
+| Real devices | your keyboard and mouse drive the Mac; hands only arrange |
+
+The aim is the headset's own pointer ray and a click is its select event, so a click is what the system says it is. Panels spawn about 1.4 m away at eye height; the menu has Panels closer and Panels farther.
+
 ## Typing
 
 Press **Find desk**, lay both hands flat on the desk for two seconds, and the keyboard snaps to the desk height and the direction your fingers point. Until then it floats in mid air in poke mode, where a finger has to go through the plane. A press is a fast downward fingertip move that ends at the plane; a finger resting on the desk never types, and thumbs press Space. The globe key switches layout.
