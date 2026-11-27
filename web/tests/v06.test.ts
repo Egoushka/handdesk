@@ -28,12 +28,12 @@ describe("main menu layout", () => {
     });
   }
   it("the Mode tab has the six modes as tiles and marks the current one", () => {
-    const zs = deckLayout({ ...defaultDeck(), mode: "arrange" });
+    const zs = deckLayout({ ...defaultDeck(), tab: "mode", mode: "arrange" });
     expect(zs.filter((z) => z.id.startsWith("mode:")).map((z) => z.id)).toEqual(MODES.map((m) => `mode:${m.id}`));
     expect(zs.filter((z) => z.active && z.id.startsWith("mode:")).map((z) => z.id)).toEqual(["mode:arrange"]);
   });
   it("every section is a tab and the Windows list pages at six", () => {
-    expect(TABS.map((t) => t.id)).toEqual(["mode", "windows", "snips", "hands", "distance", "help"]);
+    expect(TABS.map((t) => t.id)).toEqual(["windows", "snips", "mode", "hands", "distance", "help"]);
     const s = full("windows");
     expect(deckLayout(s).filter((z) => z.id.startsWith("win:")).length).toBe(WINDOWS_PER_PAGE);
     expect(pageCount(9)).toBe(2);
@@ -47,7 +47,7 @@ describe("main menu layout", () => {
 
 describe("hit testing", () => {
   it("a normalised point maps to the zone drawn there; later zones win; disabled and text are not hit", () => {
-    const zs = deckLayout(defaultDeck());
+    const zs = deckLayout({ ...defaultDeck(), tab: "mode" });
     const t = zs.find((z) => z.id === "mode:touch")!;
     expect(zoneAt(zs, (t.x + t.w / 2) / DECK_W, (t.y + t.h / 2) / DECK_H, DECK_W, DECK_H)?.id).toBe("mode:touch");
     const close = zs.find((z) => z.id === "close")!;
@@ -66,15 +66,15 @@ describe("hit testing", () => {
 });
 
 describe("guide, cheat sheet and Menu button", () => {
-  it("the guide has five short steps and walks Back and Next to Done", () => {
-    expect(GUIDE.length).toBe(5);
+  it("the guide has six short steps and walks Back and Next to Done", () => {
+    expect(GUIDE.length).toBe(6);
     for (const g of GUIDE) expect(g.body.length).toBeLessThan(130);
     expect(guideLayout(0).find((z) => z.id === "gBack")!.disabled).toBe(true);
-    expect(guideLayout(4).find((z) => z.id === "gNext")!.label).toBe("Done");
+    expect(guideLayout(5).find((z) => z.id === "gNext")!.label).toBe("Done");
     for (const z of guideLayout(2).filter(interactive)) { expect(z.x + z.w).toBeLessThanOrEqual(GUIDE_W); expect(z.y + z.h).toBeLessThanOrEqual(GUIDE_H); }
   });
-  it("the cheat sheet is one page of ten gestures, all inside the panel, closed by a tap anywhere", () => {
-    expect(SHEET.length).toBe(10);
+  it("the cheat sheet is one page of twelve gestures, all inside the panel, closed by a tap anywhere", () => {
+    expect(SHEET.length).toBe(12);
     const zs = sheetLayout();
     for (const z of zs) { expect(z.x + z.w).toBeLessThanOrEqual(SHEET_W); expect(z.y + z.h).toBeLessThanOrEqual(SHEET_H); }
     expect(zoneAt(zs, 0.5, 0.5, SHEET_W, SHEET_H)?.id).toBe("sheetClose");

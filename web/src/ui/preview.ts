@@ -4,6 +4,8 @@ import * as THREE from "three";
 import { Surface } from "./surface";
 import { DECK_H, DECK_M, DECK_W, deckLayout, defaultDeck, type Tab } from "./deck";
 import { CHIP_H, CHIP_M, CHIP_W, GUIDE_H, GUIDE_M, GUIDE_W, SHEET_H, SHEET_M, SHEET_W, chipLayout, guideLayout, modeIconOf, sheetLayout } from "./guide";
+import { RADIAL, RADIAL_M, radialLayout } from "./radial";
+import { BAR_H, BAR_PX_PER_M, barLayout } from "./rescue";
 import type { Mode } from "../modes/modes";
 
 const q = new URLSearchParams(location.search);
@@ -69,9 +71,24 @@ if (s === "sheet") {
   const g = new Surface("sheet", SHEET_M, SHEET_W, SHEET_H); g.hover = hover;
   place(g, 1.0, 0, -0.05); g.setZones(sheetLayout(), 0);
 }
-const chip = new Surface("menu", CHIP_M, CHIP_W, CHIP_H, true);
+if (s === "radial") {
+  const r = new Surface("radial", RADIAL_M, RADIAL, RADIAL, "radial"); r.hover = hover;
+  place(r, 0.8, 0, -0.05); r.setZones(radialLayout(), 0);
+}
+if (s === "bars") {
+  // a title bar over the screen, a window panel and a snip, as in the headset
+  const bar = (title: string, closable: boolean, wM: number, x: number, y: number, z: number): void => {
+    const b = new Surface("bar", wM, Math.round(wM * BAR_PX_PER_M), BAR_H); b.hover = closable ? hover : undefined;
+    b.panel.center = { x, y, z: -z }; b.sync(); scene.add(b.mesh); b.show(true); b.setZones(barLayout(b.W, title, closable), 0);
+  };
+  bar("Mac screen", false, 1.2, 0, 1.6 + 1.3 * 900 / 1600 / 2 + 0.056, 1.4);
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(0.9, 0.56), new THREE.MeshBasicMaterial({ map: new THREE.CanvasTexture(fakeWin("#0f766e", "Terminal")) }));
+  win.position.set(-0.55, 1.4, -1.0); win.rotation.y = 0.45; scene.add(win);
+  bar("Terminal: zsh - 120x32", true, 0.9, -0.55, 1.4 + 0.28 + 0.056, 1.0); scene.children[scene.children.length - 1]!.rotation.y = 0.45;
+}
+const chip = new Surface("menu", CHIP_M, CHIP_W, CHIP_H, "orb");
 chip.hover = s === "chip" ? hover : undefined;
-if (s !== "guide") { place(chip, 1.0, -0.25, -0.52); chip.setZones(chipLayout(modeInfoLabel(state.mode), "ok", modeIconOf(state.mode)), 0); }
+if (s !== "guide" && s !== "radial") { place(chip, 0.75, -0.3, -0.3); chip.setZones(chipLayout(modeInfoLabel(state.mode), "ok", modeIconOf(state.mode)), 0); }
 function modeInfoLabel(m: Mode): string { return m === "real" ? "Real devices" : m[0]!.toUpperCase() + m.slice(1); }
 
 renderer.render(scene, camera);

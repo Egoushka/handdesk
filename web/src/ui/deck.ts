@@ -9,11 +9,11 @@ export const DECK_M = 0.92;
 
 export type Tab = "mode" | "windows" | "snips" | "hands" | "distance" | "help";
 export const TABS: { id: Tab; label: string; icon: IconName }[] = [
-  { id: "mode", label: "Mode", icon: "point" },
   { id: "windows", label: "Windows", icon: "windows" },
   { id: "snips", label: "Snips", icon: "snip" },
+  { id: "mode", label: "Mode", icon: "point" },
   { id: "hands", label: "Hands", icon: "hand" },
-  { id: "distance", label: "Distance", icon: "distance" },
+  { id: "distance", label: "Screen", icon: "distance" },
   { id: "help", label: "Help", icon: "help" },
 ];
 
@@ -47,7 +47,7 @@ const BLURB: Record<Mode, string> = {
 };
 
 const PAD = 24;
-const RAIL_W = 350;
+const RAIL_W = 400;
 const HEAD_H = 104;
 const GAP = 24;
 const CX = PAD + RAIL_W + PAD;
@@ -67,7 +67,9 @@ export function deckLayout(s: DeckState): Zone[] {
   const z: Zone[] = [];
   z.push({ id: "drag", kind: "drag", x: 0, y: 0, w: DECK_W, h: HEAD_H, label: "handdesk", sub: s.status, icon: "desk" });
   z.push({ id: "close", kind: "button", x: DECK_W - PAD - 88, y: 8, w: 88, h: 88, label: "", icon: "close" });
-  TABS.forEach((t, i) => z.push({ id: `tab:${t.id}`, kind: "tab", x: PAD, y: CY + i * 140, w: RAIL_W, h: 130, label: t.label, icon: t.icon, active: s.tab === t.id, size: 50 }));
+  const ROW = 104, RH = 96;
+  TABS.forEach((t, i) => z.push({ id: `tab:${t.id}`, kind: "tab", x: PAD, y: CY + i * ROW, w: RAIL_W, h: RH, label: t.label, icon: t.icon, active: s.tab === t.id, size: 50 }));
+  z.push({ id: "closeExtras", kind: "button", x: PAD, y: DECK_H - PAD - RH, w: RAIL_W, h: RH, label: "Close all extras", size: 46, danger: true });
 
   if (s.tab === "mode") {
     const w = Math.floor((CW - GAP * 2) / 3);
@@ -76,7 +78,7 @@ export function deckLayout(s: DeckState): Zone[] {
   } else if (s.tab === "windows") {
     z.push(...row(3, CY, 104, (i, x, w) => [
       { id: "search", kind: "button", x, y: 0, w, h: 0, label: "Search", icon: "search", size: 50 } as Zone,
-      { id: "addDisplay", kind: "button", x, y: 0, w, h: 0, label: "Add screen", icon: "display", size: 50 } as Zone,
+      { id: "addDisplay", kind: "button", x, y: 0, w, h: 0, label: "Screen +", icon: "display", size: 50 } as Zone,
       { id: s.dimmed ? "dimOff" : "dimOn", kind: "button", x, y: 0, w, h: 0, label: s.dimmed ? "Restore Mac" : "Dim Mac", icon: "moon", size: 50 } as Zone,
     ][i]!));
     const pages = pageCount(s.windows.length);
@@ -141,5 +143,5 @@ export function deckLayout(s: DeckState): Zone[] {
 }
 
 export const defaultDeck = (): DeckState => ({
-  tab: "mode", mode: "point", hand: "virtual", distance: 1.4, env: "Passthrough", status: "", windows: [], page: 0, snips: [], snipMode: false, calibrating: false, deskSet: false, log: false, dimmed: false,
+  tab: "windows", mode: "point", hand: "virtual", distance: 1.4, env: "Passthrough", status: "", windows: [], page: 0, snips: [], snipMode: false, calibrating: false, deskSet: false, log: false, dimmed: false,
 });

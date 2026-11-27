@@ -7,11 +7,12 @@ export const GUIDE_H = 800;
 export const GUIDE_M = 0.95;
 export interface GuideStep { title: string; body: string; icon: IconName }
 export const GUIDE: GuideStep[] = [
+  { title: "Find the Menu", body: "Pinch the glowing Menu orb by your left wrist, or flip your wrist. Controllers: aim and pull the trigger, or tap B or Y.", icon: "menu" },
   { title: "Point and pinch", body: "Aim your hand at a screen. Touch thumb to index finger to click. Hold the pinch and move to drag.", icon: "pinch" },
-  { title: "Switch mode", body: "Open the menu and pick a mode: Point, Touch, Trackpad, Type, Arrange or Real devices. Point is the default.", icon: "point" },
-  { title: "Open a window", body: "Menu, then Windows. Tap a window and it floats as its own panel you can move.", icon: "windows" },
-  { title: "Make a snip", body: "Menu, then Snips, then New snip. Drag a box on a screen to keep that part in view.", icon: "snip" },
-  { title: "Summon the menu", body: "Flip your left wrist, or tap the Menu button under the screen. Flip again to hide it.", icon: "flip" },
+  { title: "Switch mode", body: "Menu, then Modes: Point, Touch, Trackpad, Type, Arrange or Real devices. Point is the default.", icon: "point" },
+  { title: "Open a window", body: "Menu, then Windows. Tap a window and it floats as its own panel. Tap again to pull it forward.", icon: "windows" },
+  { title: "Make a snip", body: "Menu, then Snips, New snip. Drag a box on a screen to keep that part in view.", icon: "snip" },
+  { title: "Lost? Reset", body: "Hold both fists 1.5 s, or hold B or Y. Extras close, the screen returns, the Menu opens. In Arrange, flick a panel to close it.", icon: "flip" },
 ];
 
 export function guideLayout(step: number): Zone[] {
@@ -30,7 +31,7 @@ export function guideLayout(step: number): Zone[] {
 }
 
 export const SHEET_W = 1600;
-export const SHEET_H = 1080;
+export const SHEET_H = 1260;
 export const SHEET_M = 1.1;
 export const SHEET: { icon: IconName; title: string; body: string }[] = [
   { icon: "pinch", title: "Pinch", body: "Thumb to index: click. Hold and move: drag" },
@@ -43,6 +44,8 @@ export const SHEET: { icon: IconName; title: string; body: string }[] = [
   { icon: "touch", title: "Fingertip", body: "Poke through a panel: tap (Touch mode)" },
   { icon: "thumb", title: "Thumb up", body: "Enter. Snap fingers: screenshot" },
   { icon: "flip", title: "Left wrist flip", body: "Open or hide the menu" },
+  { icon: "menu", title: "Controller B or Y", body: "Tap: open the menu. Hold 0.8 s: reset" },
+  { icon: "twohands", title: "Both fists, 1.5 s", body: "Reset: close all extras, re-centre, open menu" },
 ];
 export function sheetLayout(): Zone[] {
   const z: Zone[] = [
@@ -52,16 +55,17 @@ export function sheetLayout(): Zone[] {
   ];
   const colW = 700, rowH = 176, y0 = 150;
   SHEET.forEach((g, i) => {
-    const col = Math.floor(i / 5), r = i % 5;
+    const col = Math.floor(i / 6), r = i % 6;
     z.push({ id: `g${i}`, kind: "text", x: 64 + col * (colW + 72), y: y0 + r * (rowH + 4), w: colW, h: rowH, label: g.title, sub: g.body, icon: g.icon, size: 54 });
   });
   return z;
 }
 
 /** The small always-there Menu button under the screen. It also carries the mode, so it doubles as the compact HUD. */
-export const CHIP_W = 800;
-export const CHIP_H = 190;
-export const CHIP_M = 0.45;
+export const CHIP_W = 480;
+export const CHIP_H = 480;
+export const CHIP_M = 0.22;
+/** The Menu orb: an arc-reactor that floats by the left wrist. `label` is the mode, drawn small under the orb. */
 export function chipLayout(label: string, link: "ok" | "wait" | "bad", modeIcon: IconName): Zone[] {
   return [
     { id: "menu", kind: "button", x: 0, y: 0, w: CHIP_W, h: CHIP_H, label, sub: link, icon: modeIcon, primary: true },

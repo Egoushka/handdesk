@@ -15,7 +15,7 @@ export class Surface {
   private readonly texture: THREE.CanvasTexture;
   private sig = "";
 
-  constructor(readonly id: string, widthM: number, readonly W: number, readonly H: number, private readonly chip = false) {
+  constructor(readonly id: string, widthM: number, readonly W: number, readonly H: number, private readonly look: "panel" | "orb" | "radial" = "panel") {
     this.canvas.width = W;
     this.canvas.height = H;
     this.panel = { display: -1, center: { x: 0, y: 1.2, z: -1 }, yaw: 0, width: widthM, height: widthM * (H / W), curve: 0 };
@@ -37,13 +37,13 @@ export class Surface {
   zoneAt(x: number, y: number): Zone | undefined { return zoneAt(this.zones, x, y, this.W, this.H); }
 
   /** Redraw only when the zones, the hover or the press changed; `extra` is a cache key for live content such as thumbnails. */
-  setZones(zones: Zone[], now: number, opts: Omit<DrawOpts, "hover" | "pressed" | "chip"> = {}, extra = ""): void {
+  setZones(zones: Zone[], now: number, opts: Omit<DrawOpts, "hover" | "pressed" | "look"> = {}, extra = ""): void {
     this.zones = zones;
     if (this.pressed && now > this.pressed.until) this.pressed = undefined;
     const sig = JSON.stringify([zones, this.hover, this.pressed?.id, extra]);
     if (sig === this.sig) return;
     this.sig = sig;
-    drawZones(this.canvas.getContext("2d")!, this.W, this.H, zones, { ...opts, hover: this.hover, pressed: this.pressed?.id, chip: this.chip });
+    drawZones(this.canvas.getContext("2d")!, this.W, this.H, zones, { ...opts, hover: this.hover, pressed: this.pressed?.id, look: this.look });
     this.texture.needsUpdate = true;
   }
 }
