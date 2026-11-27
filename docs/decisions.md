@@ -84,3 +84,9 @@ The video header already carries a one-byte stream id, so window streams reuse i
 
 ## D25 Virtual displays are only ever the agent's own
 `remove` accepts only ids the agent created, and all of them go when the last client leaves, so a crashed headset cannot leave extra screens or a dark physical display (dimming restores on leave and on exit).
+
+## D26 Wi-Fi without a cable is wireless adb; a trusted LAN certificate is deferred (2026-11-27)
+The USB cable dropped mid-session, and `adb reverse` died with it. Wireless adb (D20) keeps the same `localhost` secure context over Wi-Fi with no certificate and no warning, so v0.2.2 makes it the cable-free path: `handdesk wifi` once, the agent remembers the address, reconnects after a Mac or adb restart, and re-applies the reverse. The recommended alternative, a Let's Encrypt cert for a name such as handdesk.lab.hrabovskyi.online pointing at the Mac's LAN address, needs a new homelab stack on nickel to issue a dedicated single-name cert by DNS-01 and a sanctioned way to deliver the key to the Mac; raw ssh to nickel is blocked by the box guard and the existing wildcard's key should not leave the edge. That is a separate piece of work (issue). Limit of the chosen path: after the headset restarts, wireless adb is off until one USB connection runs `handdesk wifi` again.
+
+## D27 Retain what the agent starts (issue #5)
+`AdbSupervisor(...).start()` and `PermissionWatcher().start()` were temporaries, deallocated at once, so their timers never fired: no reverse after a restart and no permission log. They are now held in globals. `handdesk open` also sets the reverse itself and fails loudly if it cannot.

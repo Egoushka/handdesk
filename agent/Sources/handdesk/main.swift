@@ -61,6 +61,9 @@ func parseStart(_ args: [String]) -> ServerConfig {
     return c
 }
 var noAdb = false
+// retained for the life of the process: a timer owned by a dropped object never fires (issue #5)
+var adbSupervisor: AdbSupervisor?
+var permissionWatcher: PermissionWatcher?
 var logLevel = LogLevel.info
 
 func command(_ cmd: String) -> Never {
@@ -105,8 +108,9 @@ case "start":
     log.info("start", ["version": agentVersion, "port": Int(config.port), "lan": config.lan, "displays": displays.count, "logLevel": logLevel.name,
                        "screenRecording": perms.screenRecording, "accessibility": perms.accessibility, "web": config.webRoot])
     if !FileManager.default.fileExists(atPath: config.webRoot + "/index.html") { log.warn("error", ["where": "web", "message": "no page at \(config.webRoot)"]) }
-    if !noAdb && !config.lan { AdbSupervisor(port: config.port).start() }
-    PermissionWatcher().start()
+    if !noAdb && !config.lan { adbSupervisor = AdbSupervisor(port: config.port); adbSupervisor?.start() }
+    permissionWatcher = PermissionWatcher()
+    permissionWatcher?.start()
     // the pairing URL is shown only to a terminal; under launchd it would end up in a log file (use `handdesk open`)
     if isatty(1) != 0 { print("Open on the Quest: http://localhost:\(config.port)/?t=\(config.token)") }
     else { print("Pairing URL not printed (not a terminal): run `handdesk open` to open it on the headset") }

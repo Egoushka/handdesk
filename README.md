@@ -69,7 +69,7 @@ scripts/handdesk start
 
 It prints a URL such as `http://localhost:8787/?t=<pairing token>`. Open exactly that URL in the Quest Browser, then press Enter AR. The agent runs `adb reverse tcp:8787 tcp:8787`, so `localhost` on the headset is the Mac: `localhost` counts as a secure context, which WebXR requires, so there is no certificate to accept.
 
-`scripts/handdesk doctor` shows which permissions are missing. macOS asks for two, and only you can grant them: Screen Recording (to capture the displays) and Accessibility (to post mouse and key events). `scripts/handdesk launchagent install` keeps the agent running at login. `scripts/handdesk wifi` (headset on USB once) switches adb to Wi-Fi, and `scripts/handdesk open` opens the page on the headset. The build signs the binary with a local identity, so the permissions survive rebuilds (decision D21).
+`scripts/handdesk doctor` shows which permissions are missing. macOS asks for two, and only you can grant them: Screen Recording (to capture the displays) and Accessibility (to post mouse and key events). `scripts/handdesk launchagent install` keeps the agent running at login. `scripts/handdesk wifi` (headset on USB once) switches adb to Wi-Fi and the agent remembers the address and reconnects on its own, so no cable is needed afterwards (until the headset restarts); bookmark `http://localhost:8787/` in the Quest Browser (the pairing token is kept in the page's storage). `scripts/handdesk open` opens the page, and `scripts/handdesk open` opens the page on the headset. The build signs the binary with a local identity, so the permissions survive rebuilds (decision D21).
 
 A prebuilt Mac package (agent plus page) is attached to each [release](https://github.com/Egoushka/handdesk/releases).
 

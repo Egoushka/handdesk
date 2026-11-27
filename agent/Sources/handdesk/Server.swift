@@ -398,7 +398,7 @@ final class Session {
                 switch f.opcode {
                 case .text: handleText(f.payload)
                 case .ping: send(WebSocket.encode(opcode: .pong, payload: f.payload))
-                case .close: close("client closed"); send(WebSocket.encode(opcode: .close, payload: Data()), thenClose: true); return
+                case .close: close(Adb.describeClose(f.payload)); send(WebSocket.encode(opcode: .close, payload: Data()), thenClose: true); return
                 default: break
                 }
             }
