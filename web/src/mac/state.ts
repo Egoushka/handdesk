@@ -73,7 +73,7 @@ export class MacState {
 export type LauncherAction =
   | { kind: "send"; message: ClientMessage }
   | { kind: "window"; windowId: number }
-  | { kind: "local"; id: "close" | "addDisplay" | "dimOn" | "dimOff" | "env" | "recenter" | "save" | "kb" | "cal" | "launcher" | "hands" | "gestures" };
+  | { kind: "local"; id: "close" | "addDisplay" | "dimOn" | "dimOff" | "env" | "recenter" | "save" | "kb" | "cal" | "launcher" | "hands" | "gestures" | "snipDraw" | "snipList" | "snipsClear" | `snipPin:${number}` | `snipClose:${number}` };
 
 export interface Row { text: string; sub?: string; action?: LauncherAction; header?: boolean }
 

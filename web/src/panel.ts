@@ -1,4 +1,5 @@
 import type { Ray, Vec3 } from "./gesture/types";
+import { toSource, type Rect } from "./snip/rect";
 
 /** A Mac display floating in space. Faces +z locally (towards the viewer) before yaw is applied. */
 export interface Panel {
@@ -13,6 +14,8 @@ export interface Panel {
   height: number;
   /** total horizontal arc in radians; 0 is flat. The surface curves towards the viewer. */
   curve: number;
+  /** set on a snip: the region of the source display or window it shows. A hit is then reported in source coordinates. */
+  crop?: Rect;
 }
 
 export interface Hit { display: number; window?: number; x: number; y: number; t: number }
@@ -31,6 +34,7 @@ export function dirToLocal(d: Vec3, panel: Panel): Vec3 {
 }
 
 function hit(panel: Panel, x: number, y: number, t: number): Hit {
+  if (panel.crop) ({ x, y } = toSource(panel.crop, x, y));
   return panel.windowId === undefined ? { display: panel.display, x, y, t } : { display: panel.display, window: panel.windowId, x, y, t };
 }
 

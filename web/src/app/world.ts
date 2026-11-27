@@ -427,11 +427,13 @@ export class UiPanel {
 
 // ---- handles and touch dots ----
 export class HandleDots {
-  readonly mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.025, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.9 }), 64);
+  readonly mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.025, 12, 8), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9 }), 64);
   constructor() { this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = 6; }
   set(handles: Handle[]): void {
     const m = new THREE.Matrix4();
-    handles.slice(0, 64).forEach((h, i) => { m.setPosition(h.pos.x, h.pos.y, h.pos.z); this.mesh.setMatrixAt(i, m); });
+    const c = new THREE.Color();
+    handles.slice(0, 64).forEach((h, i) => { m.setPosition(h.pos.x, h.pos.y, h.pos.z); this.mesh.setMatrixAt(i, m); this.mesh.setColorAt(i, c.set(h.kind === "pin" ? 0x4ade80 : h.kind === "close" ? 0xf87171 : 0xfbbf24)); });
+    if (this.mesh.instanceColor) this.mesh.instanceColor.needsUpdate = true;
     this.mesh.count = Math.min(64, handles.length);
     this.mesh.instanceMatrix.needsUpdate = true;
   }
