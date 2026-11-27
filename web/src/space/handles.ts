@@ -2,7 +2,7 @@ import { dist } from "../gesture/math";
 import type { Ray, Vec3 } from "../gesture/types";
 import { planePoint, toLocal, type Panel } from "../panel";
 
-export type HandleKind = "scale-tl" | "scale-tr" | "scale-bl" | "scale-br" | "move" | "curve";
+export type HandleKind = "scale-tl" | "scale-tr" | "scale-bl" | "scale-br" | "move" | "curve" | "pin" | "close";
 export interface Handle { kind: HandleKind; pos: Vec3 }
 
 /** Local-frame to world, the inverse of toLocal. */
@@ -51,10 +51,10 @@ function rayPointDistance(r: Ray, pt: Vec3): number {
 }
 
 /** The handle a ray passes within `radius` of, nearest to the ray. */
-export function pickHandle(ray: Ray, p: Panel, radius = 0.07): Handle | undefined {
+export function pickHandle(ray: Ray, p: Panel, radius = 0.07, handles: Handle[] = handlesOf(p)): Handle | undefined {
   let best: Handle | undefined;
   let bestD = radius;
-  for (const h of handlesOf(p)) {
+  for (const h of handles) {
     const d = rayPointDistance(ray, h.pos);
     if (d < bestD) { bestD = d; best = h; }
   }
@@ -68,6 +68,7 @@ export const touchesHandle = (tip: Vec3, p: Panel, radius = 0.04): Handle | unde
  * Scale keeps the aspect ratio and the opposite corner's side; curve follows horizontal motion; move translates in the panel's plane.
  */
 export function dragHandle(start: Panel, kind: HandleKind, from: Vec3, to: Vec3): Panel {
+  if (kind === "pin" || kind === "close") return start;
   if (kind === "move") {
     const d = toWorldPoint({ x: to.x - from.x, y: to.y - from.y, z: 0 }, { ...start, center: { x: 0, y: 0, z: 0 } });
     return { ...start, center: { x: start.center.x + d.x, y: start.center.y + d.y, z: start.center.z + d.z } };

@@ -18,9 +18,9 @@ export const SESSION_INIT = {
 
 export type XRMode = "immersive-ar" | "immersive-vr";
 
-export async function startSession(mode: XRMode): Promise<XRSession> {
+export async function startSession(mode: XRMode, realHands = false): Promise<XRSession> {
   if (!navigator.xr) throw new Error("WebXR is not available in this browser (open the page in the Quest Browser)");
-  return navigator.xr.requestSession(mode, sessionInit(mode));
+  return navigator.xr.requestSession(mode, sessionInit(mode, realHands));
 }
 
 /** Head frame: yaw-only rotation about the head position (decision D8). */

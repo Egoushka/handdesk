@@ -99,3 +99,10 @@ Supersedes the "stated limit" in D18: Quest Browser does offer WebXR `depth-sens
 
 ## D30 Extra gestures are a separate detector (2026-11-27)
 `gesture/extra.ts` reads the same viewer-space frames as the classifier but does not touch it, so the pointer work can change independently. It emits events; shortcut events become key messages (`gesture/extraMessages.ts`), fist drag reuses the pinch-drag mapping, spread scales the panel in the gaze, and title-strip move rides on the existing pinch drag. Thresholds are starting values in `gesture/extraConfig.ts` (D10). Snap detection from hand joints is the least reliable of the set: hand tracking runs at about 30 to 60 Hz and a snap is a few frames long; expect to tune `snapSpeed` or drop it.
+
+## D31 The hand is a virtual glove from our own joints (v0.3.2, 2026-11-27)
+Feedback on v0.3.1: the real/skinned hands looked bad and Yehor wants a virtual hand. The default is now `virtual`: a rim-lit translucent glove (tapered capsules, joint spheres, a palm sheet) built from the same 25 joints the gestures use, so it works identically in passthrough and VR and needs no model file. Real-hand occlusion (depth sensing) is requested only in `real` mode, since it hid the glove and panels. A held pose (300 ms, then a 200 ms fade) stops tracking flicker from blinking the hand. The saved-mode key changed to `handMode2` so the old default does not stick. Reverse if: the glove reads as too ghostly on the headset; tune `opacity` and the rim in `hands/glove.ts`.
+
+## D32 Snips are uv crops of the source texture (v0.3.2)
+A snip is a second mesh on the source's own canvas texture with the uv cut to the region: no second capture, always live. Pointing is mapped by `Panel.crop` inside `intersect`, so picking, direct touch and the Mac coordinates all agree without special cases. The gesture is thumb to ring finger because index, middle and both are taken by click, right click and scroll; the menu button is the fallback. Only pinned snips persist, per source key, like layouts (two windows of one app share a key). Open: snips of a closed window are hidden until the panel returns; a snip of a snip is not supported.
+

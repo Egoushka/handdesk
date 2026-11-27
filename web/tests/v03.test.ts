@@ -155,24 +155,26 @@ describe("hand mode", () => {
     expect(loadHandMode(s)).toBeUndefined();
     saveHandMode(s, "joints");
     expect(loadHandMode(s)).toBe("joints");
-    store.set("handdesk.handMode", "bogus");
+    store.set("handdesk.handMode2", "bogus");
     expect(loadHandMode(s)).toBeUndefined();
-    expect(HAND_MODES.map((m) => nextHandMode(m.id))).toEqual(["skinned", "joints", "real"]);
+    expect(HAND_MODES.map((m) => nextHandMode(m.id))).toEqual(["real", "skinned", "joints", "virtual"]);
     expect(isHandMode("real")).toBe(true);
-    expect(effectiveHandMode(undefined, false)).toBe("real");
-    expect(effectiveHandMode(undefined, true)).toBe("skinned");
-    expect(effectiveHandMode("real", true)).toBe("skinned");
+    expect(effectiveHandMode(undefined, false)).toBe("virtual");
+    expect(effectiveHandMode(undefined, true)).toBe("virtual");
+    expect(effectiveHandMode("real", true)).toBe("virtual");
     expect(effectiveHandMode("joints", true)).toBe("joints");
   });
 });
 
 describe("session request", () => {
-  it("passthrough asks for depth sensing; VR does not", () => {
-    const ar = sessionInit("immersive-ar") as { optionalFeatures: string[]; depthSensing?: unknown };
+  it("passthrough asks for depth sensing only for real hands; VR never does", () => {
+    const none = sessionInit("immersive-ar") as { optionalFeatures: string[] };
+    expect(none.optionalFeatures).not.toContain("depth-sensing");
+    const ar = sessionInit("immersive-ar", true) as { optionalFeatures: string[]; depthSensing?: unknown };
     expect(ar.optionalFeatures).toContain("depth-sensing");
     expect(ar.optionalFeatures).toContain("hand-tracking");
     expect(ar.depthSensing).toBeDefined();
-    const vr = sessionInit("immersive-vr") as { optionalFeatures: string[]; depthSensing?: unknown };
+    const vr = sessionInit("immersive-vr", true) as { optionalFeatures: string[]; depthSensing?: unknown };
     expect(vr.optionalFeatures).not.toContain("depth-sensing");
     expect(vr.depthSensing).toBeUndefined();
   });
