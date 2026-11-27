@@ -61,3 +61,20 @@ test("without a pairing token the page tells the user which URL to open", async 
   await page.goto("/");
   await expect(page.locator("#link")).toContainText("pairing token");
 });
+
+test("offers a session through offerSession when the browser has it", async ({ page }) => {
+  await page.addInitScript(`
+    window.__offers = [];
+    navigator.xr.offerSession = (mode, init) => { window.__offers.push({ mode, init: JSON.parse(JSON.stringify(init || {})) }); return new Promise(() => {}); };
+  `);
+  await page.goto("/");
+  await expect.poll(() => page.evaluate(() => (window as any).__offers.length)).toBe(1);
+  const o = await page.evaluate(() => (window as any).__offers[0]);
+  expect(o.mode).toBe("immersive-ar");
+  expect(o.init.optionalFeatures).toContain("hand-tracking");
+});
+
+test("without offerSession the page shows how to enter", async ({ page }) => {
+  await page.goto("/");
+  await expect(page.locator("#status")).toContainText("Press Enter AR");
+});

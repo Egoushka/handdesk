@@ -10,6 +10,10 @@ public final class EventMapper {
     public static let magnifyStep: Double = 0.12
 
     public var displays: [DisplayInfo]
+    /// Latest window list (the server refreshes it); window-addressed input is mapped through it.
+    public var windows: [WindowInfo] = []
+    /// Called with the pid of a window's app before a button press on that window: focus follows the touch.
+    public var activator: ((Int32) -> Void)?
     public var magnifyMode: MagnifyMode
     public var invertScroll: Bool
     private let poster: EventPoster
@@ -34,31 +38,21 @@ public final class EventMapper {
 
     public func handle(_ message: ClientMessage) {
         switch message {
-        case .subscribe:
+        case .subscribe, .ping, .log, .subscribeStreams, .windows, .virtualDisplay, .dimPhysical, .apps, .app, .spotlight, .open:
             break // owned by the server
         case let .move(d, x, y):
             guard let disp = display(d) else { return }
-            let p = disp.globalPoint(x: x, y: y)
-            lastPoint = p
-            if let b = heldButton { poster.mouseDrag(to: p, button: b) } else { poster.mouseMove(to: p) }
+            move(to: disp.globalPoint(x: x, y: y))
         case let .button(d, button, down, x, y):
             guard let disp = display(d) else { return }
-            let p = disp.globalPoint(x: x, y: y)
-            lastPoint = p
-            if down {
-                let t = now()
-                var count = 1
-                if let last = lastDown, last.button == button, t - last.time <= Self.doubleClickInterval,
-                   hypot(Double(p.x - last.point.x), Double(p.y - last.point.y)) <= Self.doubleClickDistance {
-                    count = min(last.count + 1, 3)
-                }
-                lastDown = (button, p, t, count)
-                heldButton = button
-                poster.mouseButton(button, down: true, at: p, clickCount: count)
-            } else {
-                heldButton = nil
-                poster.mouseButton(button, down: false, at: p, clickCount: lastDown?.count ?? 1)
-            }
+            press(button, down: down, at: disp.globalPoint(x: x, y: y))
+        case let .moveWindow(w, x, y):
+            guard let win = windows.first(where: { $0.id == w }) else { return }
+            move(to: win.globalPoint(x: x, y: y))
+        case let .buttonWindow(w, button, down, x, y):
+            guard let win = windows.first(where: { $0.id == w }) else { return }
+            if down { activator?(win.pid) }
+            press(button, down: down, at: win.globalPoint(x: x, y: y))
         case let .scroll(dx, dy):
             let sign: Double = invertScroll ? -1 : 1
             guard dx.isFinite, dy.isFinite else { return }
@@ -91,6 +85,29 @@ public final class EventMapper {
             }
         case let .text(s):
             poster.text(s)
+        }
+    }
+
+    private func move(to p: CGPoint) {
+        lastPoint = p
+        if let b = heldButton { poster.mouseDrag(to: p, button: b) } else { poster.mouseMove(to: p) }
+    }
+
+    private func press(_ button: MouseButton, down: Bool, at p: CGPoint) {
+        lastPoint = p
+        if down {
+            let t = now()
+            var count = 1
+            if let last = lastDown, last.button == button, t - last.time <= Self.doubleClickInterval,
+               hypot(Double(p.x - last.point.x), Double(p.y - last.point.y)) <= Self.doubleClickDistance {
+                count = min(last.count + 1, 3)
+            }
+            lastDown = (button, p, t, count)
+            heldButton = button
+            poster.mouseButton(button, down: true, at: p, clickCount: count)
+        } else {
+            heldButton = nil
+            poster.mouseButton(button, down: false, at: p, clickCount: lastDown?.count ?? 1)
         }
     }
 

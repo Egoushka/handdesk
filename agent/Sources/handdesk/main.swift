@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 import ApplicationServices
 import HandDeskCore
+import CVD
+
+nonisolated(unsafe) var signalSources: [DispatchSourceSignal] = []
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
@@ -49,6 +52,7 @@ func parseStart(_ args: [String]) -> ServerConfig {
         case "--bitrate": guard let b = Int(value("--bitrate")), b > 0 else { fail("bad --bitrate") }; c.bitrate = b
         case "--max-width": guard let w = Int(value("--max-width")), w >= 320 else { fail("bad --max-width") }; c.maxWidth = w
         case "--no-adb": noAdb = true
+        case "--log-level": guard let l = LogLevel(name: value("--log-level")), l <= .info else { fail("--log-level info|debug") }; logLevel = l
         default: fail("unknown option \(args[i])")
         }
         i += 1
@@ -57,18 +61,7 @@ func parseStart(_ args: [String]) -> ServerConfig {
     return c
 }
 var noAdb = false
-
-func runAdbReverse(port: UInt16) -> String {
-    let adb = ["/opt/homebrew/bin/adb", "/usr/local/bin/adb"].first { FileManager.default.isExecutableFile(atPath: $0) }
-    guard let adb = adb else { return "adb not found: install android-platform-tools, or open the page through --lan --tls-p12" }
-    let p = Process()
-    p.executableURL = URL(fileURLWithPath: adb)
-    p.arguments = ["reverse", "tcp:\(port)", "tcp:\(port)"]
-    let out = Pipe(); p.standardOutput = out; p.standardError = out
-    do { try p.run() } catch { return "adb failed to start: \(error.localizedDescription)" }
-    p.waitUntilExit()
-    return p.terminationStatus == 0 ? "adb reverse tcp:\(port) set up" : "adb reverse failed (headset connected and debugging allowed?)"
-}
+var logLevel = LogLevel.info
 
 func command(_ cmd: String) -> Never {
     let label = LaunchAgentPlist.label
@@ -82,13 +75,13 @@ func command(_ cmd: String) -> Never {
     case "install":
         let exe = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath().path
         let extra = Array(CommandLine.arguments.dropFirst(3))
-        let log = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/handdesk.log").path
+        let log = outLogURL.path
         try? FileManager.default.createDirectory(at: plist.deletingLastPathComponent(), withIntermediateDirectories: true)
         do { try LaunchAgentPlist.make(programArguments: LaunchAgentPlist.arguments(executable: exe, extra: extra, defaultWebRoot: defaultWebRoot()), logPath: log).write(to: plist, atomically: true, encoding: .utf8) }
         catch { fail("cannot write \(plist.path): \(error.localizedDescription)") }
         launchctl(["bootout", "\(domain)/\(label)"])
         launchctl(["bootstrap", domain, plist.path])
-        print("installed \(plist.path); logs in \(log)")
+        print("installed \(plist.path); structured log in \(logURL.path), launchd output in \(log)")
     case "uninstall":
         launchctl(["bootout", "\(domain)/\(label)"])
         try? FileManager.default.removeItem(at: plist)
@@ -102,31 +95,55 @@ let args = Array(CommandLine.arguments.dropFirst())
 switch args.first {
 case "start":
     var config = parseStart(Array(args.dropFirst()))
-    do { config.token = try Token.loadOrCreate(at: tokenURL) } catch { fail("cannot store the pairing token: \(error.localizedDescription)") }
+    log.level = logLevel
+    do { config.token = try Token.loadOrCreate(at: tokenURL) } catch { log.error("error", ["where": "token", "message": error.localizedDescription]); fail("cannot store the pairing token: \(error.localizedDescription)") }
     let displays = Displays.list()
-    guard !displays.isEmpty else { fail("no active displays") }
+    guard !displays.isEmpty else { log.error("error", ["where": "displays", "message": "no active displays"]); fail("no active displays") }
     let server = Server(config: config, displays: displays, poster: CGEventPoster())
-    do { try server.start() } catch { fail("cannot listen on port \(config.port): \(error.localizedDescription)") }
-    print("handdesk listening on port \(config.port) (\(config.lan ? "LAN, TLS" : "loopback only")), \(displays.count) display(s)")
-    if !FileManager.default.fileExists(atPath: config.webRoot + "/index.html") { print("warning: no page at \(config.webRoot); pass --web") }
-    if !noAdb && !config.lan { print(runAdbReverse(port: config.port)) }
-    permissionLines().forEach { print($0) }
-    print("Open on the Quest: http://localhost:\(config.port)/?t=\(config.token)")
+    do { try server.start() } catch { log.error("error", ["where": "listen", "port": Int(config.port), "message": error.localizedDescription]); fail("cannot listen on port \(config.port): \(error.localizedDescription)") }
+    let perms = currentPermissions()
+    log.info("start", ["version": agentVersion, "port": Int(config.port), "lan": config.lan, "displays": displays.count, "logLevel": logLevel.name,
+                       "screenRecording": perms.screenRecording, "accessibility": perms.accessibility, "web": config.webRoot])
+    if !FileManager.default.fileExists(atPath: config.webRoot + "/index.html") { log.warn("error", ["where": "web", "message": "no page at \(config.webRoot)"]) }
+    if !noAdb && !config.lan { AdbSupervisor(port: config.port).start() }
+    PermissionWatcher().start()
+    // the pairing URL is shown only to a terminal; under launchd it would end up in a log file (use `handdesk open`)
+    if isatty(1) != 0 { print("Open on the Quest: http://localhost:\(config.port)/?t=\(config.token)") }
+    else { print("Pairing URL not printed (not a terminal): run `handdesk open` to open it on the headset") }
+    for sig in [SIGINT, SIGTERM] {
+        signal(sig, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        src.setEventHandler { server.shutdown(); log.info("stop", ["signal": Int(sig)]); exit(0) }
+        src.resume()
+        signalSources.append(src)
+    }
     RunLoop.main.run()
 case "doctor":
     permissionLines().forEach { print($0) }
     print("Displays: \(Displays.list().map { "\($0.name) \(Int($0.width))x\(Int($0.height))" }.joined(separator: ", "))")
+    print("Virtual displays: \(cvd_available() ? "available (private CoreGraphics API present)" : "not available on this macOS")")
     print("adb: \(["/opt/homebrew/bin/adb", "/usr/local/bin/adb"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "not found")")
 case "token":
     do { print(try Token.loadOrCreate(at: tokenURL)) } catch { fail("cannot read the pairing token: \(error.localizedDescription)") }
+case "wifi":
+    commandWifi()
+case "open":
+    var port: UInt16 = 8787
+    if let i = args.firstIndex(of: "--port"), i + 1 < args.count, let p = UInt16(args[i + 1]) { port = p }
+    commandOpen(port: port)
+case "logs":
+    commandLogs(args)
 case "launchagent":
     command(args.dropFirst().first ?? "")
 default:
     print("""
     handdesk start [--port 8787] [--lan --tls-p12 FILE --host NAME] [--web DIR] [--magnify keys|gesture] [--invert-scroll]
-                   [--fps 60] [--bitrate 25000000] [--max-width 2560] [--no-adb]
+                   [--fps 60] [--bitrate 25000000] [--max-width 2560] [--no-adb] [--log-level info|debug]
     handdesk launchagent install [start options] | uninstall
     handdesk doctor
     handdesk token
+    handdesk wifi                 (headset on USB once: switch adb to Wi-Fi)
+    handdesk open [--port 8787]   (open the page on every connected headset)
+    handdesk logs [-n 50]
     """)
 }

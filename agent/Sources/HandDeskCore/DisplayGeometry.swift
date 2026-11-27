@@ -26,9 +26,18 @@ public struct DisplayInfo: Equatable {
     }
 }
 
-public func helloMessage(displays: [DisplayInfo]) -> Data {
-    let obj: [String: Any] = ["type": "hello", "version": 1, "displays": displays.map(\.helloJSON)]
+public let agentVersion = "0.2.0"
+
+public func helloMessage(displays: [DisplayInfo], permissions: Permissions = Permissions(screenRecording: false, accessibility: false)) -> Data {
+    let obj: [String: Any] = [
+        "type": "hello", "version": 2, "agent": agentVersion, "displays": displays.map(\.helloJSON),
+        "permissions": ["screenRecording": permissions.screenRecording, "accessibility": permissions.accessibility],
+    ]
     return (try? JSONSerialization.data(withJSONObject: obj, options: [.sortedKeys])) ?? Data()
+}
+
+public func pongMessage(t: Double) -> Data {
+    (try? JSONSerialization.data(withJSONObject: ["type": "pong", "t": t], options: [.sortedKeys])) ?? Data()
 }
 
 public func errorMessage(_ message: String) -> Data {

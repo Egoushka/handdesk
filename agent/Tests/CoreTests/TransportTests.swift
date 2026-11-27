@@ -136,7 +136,7 @@ final class VideoAndSupportTests {
 
     func testHelloMessage() throws {
         let obj = try JSONSerialization.jsonObject(with: helloMessage(displays: [mainDisplay])) as! [String: Any]
-        XCTAssertEqual(obj["type"] as? String, "hello"); XCTAssertEqual(obj["version"] as? Int, 1)
+        XCTAssertEqual(obj["type"] as? String, "hello"); XCTAssertEqual(obj["version"] as? Int, 2)
         let d = (obj["displays"] as! [[String: Any]])[0]
         XCTAssertEqual(d["pixelWidth"] as? Int, 2000); XCTAssertEqual(d["width"] as? Double, 1000)
     }

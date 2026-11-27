@@ -55,5 +55,43 @@ run(HardeningTests.init, [
     ("testSecurityHeaders", HardeningTests.testSecurityHeaders),
     ("testExistingTokenFileIsTightenedTo0600", HardeningTests.testExistingTokenFileIsTightenedTo0600),
 ])
+run(V2Tests.init, [
+    ("testLoggerWritesJsonLinesAndHonoursLevel", V2Tests.testLoggerWritesJsonLinesAndHonoursLevel),
+    ("testFieldsCannotOverrideReservedKeys", V2Tests.testFieldsCannotOverrideReservedKeys),
+    ("testThrottledErrorsLogOncePerWindow", V2Tests.testThrottledErrorsLogOncePerWindow),
+    ("testFileSinkRotatesAtMaxBytesKeepingOneOldFile", V2Tests.testFileSinkRotatesAtMaxBytesKeepingOneOldFile),
+    ("testScrubRemovesTokensAndControlCharacters", V2Tests.testScrubRemovesTokensAndControlCharacters),
+    ("testHelloCarriesVersion2AgentAndPermissions", V2Tests.testHelloCarriesVersion2AgentAndPermissions),
+    ("testPingDecodesAndPongEchoes", V2Tests.testPingDecodesAndPongEchoes),
+    ("testPageLogMessagesAreCleanedAndLimited", V2Tests.testPageLogMessagesAreCleanedAndLimited),
+    ("testRateLimiterAllowsTwentyPerSecond", V2Tests.testRateLimiterAllowsTwentyPerSecond),
+    ("testDebugFieldsNeverCarryKeysOrText", V2Tests.testDebugFieldsNeverCarryKeysOrText),
+    ("testAdbDeviceParsingAndReverseDetection", V2Tests.testAdbDeviceParsingAndReverseDetection),
+    ("testAdbArgumentBuilders", V2Tests.testAdbArgumentBuilders),
+    ("testWifiAddressParsing", V2Tests.testWifiAddressParsing),
+])
+run(MacTests.init, [
+    ("testSubscribeWithWindows", MacTests.testSubscribeWithWindows),
+    ("testWindowAddressedInput", MacTests.testWindowAddressedInput),
+    ("testVirtualDisplayDimAndLauncherMessages", MacTests.testVirtualDisplayDimAndLauncherMessages),
+    ("testSpotlightQueryIsCleanedAndCapped", MacTests.testSpotlightQueryIsCleanedAndCapped),
+    ("testDebugFieldsOmitTitlesAndQueries", MacTests.testDebugFieldsOmitTitlesAndQueries),
+    ("testWindowFilter", MacTests.testWindowFilter),
+    ("testWindowGeometryClampsInsideTheWindow", MacTests.testWindowGeometryClampsInsideTheWindow),
+    ("testStreamIdsAllocateReuseAndExhaust", MacTests.testStreamIdsAllocateReuseAndExhaust),
+    ("testWindowInputActivatesTheAppThenClicksInsideTheWindow", MacTests.testWindowInputActivatesTheAppThenClicksInsideTheWindow),
+    ("testRightButtonOnAWindowAlsoFocusesAndUnknownWindowsAreIgnored", MacTests.testRightButtonOnAWindowAlsoFocusesAndUnknownWindowsAreIgnored),
+    ("testWindowDoubleClickCountsLikeDisplayClicks", MacTests.testWindowDoubleClickCountsLikeDisplayClicks),
+    ("testWindowsAndAppsReplies", MacTests.testWindowsAndAppsReplies),
+    ("testAppActionsGoToTheSystem", MacTests.testAppActionsGoToTheSystem),
+    ("testVirtualDisplayAddRemoveOnlyOwnDisplays", MacTests.testVirtualDisplayAddRemoveOnlyOwnDisplays),
+    ("testVirtualDisplayUnavailableAndLimit", MacTests.testVirtualDisplayUnavailableAndLimit),
+    ("testLastClientLeavingRemovesVirtualDisplaysAndRestoresBrightness", MacTests.testLastClientLeavingRemovesVirtualDisplaysAndRestoresBrightness),
+    ("testSpotlightResultsAreOpenedByIdNeverByPath", MacTests.testSpotlightResultsAreOpenedByIdNeverByPath),
+    ("testOtherMessagesAreNotHandled", MacTests.testOtherMessagesAreNotHandled),
+    ("testMdfindArgumentsAreAnArrayAndEscaped", MacTests.testMdfindArgumentsAreAnArrayAndEscaped),
+    ("testSpotlightRankAppsFirstDedupedAndCapped", MacTests.testSpotlightRankAppsFirstDedupedAndCapped),
+    ("testOutgoingMessages", MacTests.testOutgoingMessages),
+])
 print("\(testCount) tests, \(checkCount) checks, \(failureCount) failures")
 exit(failureCount == 0 ? 0 : 1)
