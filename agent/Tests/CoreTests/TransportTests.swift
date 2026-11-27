@@ -15,6 +15,14 @@ final class TransportTests {
         XCTAssertEqual(consumed, raw.utf8.count - 4)
     }
 
+    func testStaticRequestsAreNotLimitedBySessionCap() {
+        // eight WebSocket sessions are the cap, but they must not starve the HTML/JS requests of a ninth page load
+        XCTAssertTrue(Admission.acceptConnection(total: Admission.maxSessions))
+        XCTAssertFalse(Admission.acceptUpgrade(upgraded: Admission.maxSessions))
+        XCTAssertTrue(Admission.acceptUpgrade(upgraded: Admission.maxSessions - 1))
+        XCTAssertFalse(Admission.acceptConnection(total: Admission.maxConnections))
+    }
+
     func testHTTPIncompleteAndMalformed() {
         XCTAssertEqual(HTTP.parse(Data("GET / HTTP/1.1\r\nHost: a".utf8)), .incomplete)
         XCTAssertEqual(HTTP.parse(Data("GARBAGE\r\n\r\n".utf8)), .malformed)

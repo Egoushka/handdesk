@@ -13,3 +13,10 @@ export function sessionInit(mode: XRMode, realHands = false): XRSessionInit {
     depthSensing: { usagePreference: ["gpu-optimized", "cpu-optimized"], dataFormatPreference: ["luminance-alpha", "float32"] },
   } as XRSessionInit;
 }
+
+/** The on-screen line, and the agent log message, for a failed requestSession. Names the error: a SecurityError, NotSupportedError and a feature rejection need different fixes. */
+export function startErrorText(mode: string, e: unknown): string {
+  const err = e as { name?: string; message?: string } | undefined;
+  const name = err?.name && err.name !== "Error" ? `${err.name}: ` : "";
+  return `Could not start ${mode}: ${name}${err?.message || String(e)}`;
+}

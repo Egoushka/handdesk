@@ -89,6 +89,15 @@ public extension HTTP {
     ]
 }
 
+/// Connection limits. Only WebSocket sessions are scarce: a page, a second tab and the browser's idle preconnects must not
+/// push static asset requests over the limit (the headset then got the HTML but a reset on the JS, and the buttons did nothing).
+public enum Admission {
+    public static let maxSessions = 8
+    public static let maxConnections = 64
+    public static func acceptConnection(total: Int) -> Bool { total < maxConnections }
+    public static func acceptUpgrade(upgraded: Int) -> Bool { upgraded < maxSessions }
+}
+
 public enum Auth {
     /// DNS-rebinding guard: only loopback names, plus the configured LAN name in --lan mode.
     public static func hostAllowed(host: String?, extra: String? = nil) -> Bool {
