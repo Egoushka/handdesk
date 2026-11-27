@@ -7,12 +7,12 @@ export interface DrawOpts {
   pressed?: string;
   /** live picture for a window tile, when that window has a panel */
   thumbs?: (windowId: number) => CanvasImageSource | undefined;
-  /** the small Menu button reports link state and draws differently */
-  chip?: boolean;
+  /** the Menu orb and the radial menu draw as holograms, not as a panel of buttons */
+  look?: "panel" | "orb" | "radial";
 }
 
 const FONT = "Roboto, 'Helvetica Neue', Arial, 'Liberation Sans', system-ui, sans-serif";
-export const COLORS = { text: "#f1f5f9", dim: "#a9b6cc", accent: "#3b82f6", accentDark: "#1d4ed8", ok: "#4ade80", bad: "#f87171", wait: "#fbbf24" };
+export const COLORS = { text: "#f1f5f9", dim: "#a9b6cc", accent: "#22d3ee", accentDark: "#0e7490", ok: "#4ade80", bad: "#f87171", wait: "#fbbf24" };
 
 function fit(g: G, text: string, maxW: number): string {
   if (g.measureText(text).width <= maxW) return text;
@@ -33,47 +33,97 @@ export function wrap(g: G, text: string, maxW: number): string[] {
   return out;
 }
 
+/** Translucent cyan hologram: dark teal body, a glowing hairline edge, faint scanlines. */
 function glass(g: G, W: number, H: number, r: number): void {
   const grad = g.createLinearGradient(0, 0, 0, H);
-  grad.addColorStop(0, "rgba(28,36,56,0.96)");
-  grad.addColorStop(1, "rgba(14,19,32,0.96)");
+  grad.addColorStop(0, "rgba(8,38,58,0.90)");
+  grad.addColorStop(1, "rgba(4,18,32,0.90)");
   g.fillStyle = grad;
   g.beginPath(); g.roundRect(0, 0, W, H, r); g.fill();
-  g.strokeStyle = "rgba(255,255,255,0.16)";
-  g.lineWidth = 3;
-  g.beginPath(); g.roundRect(1.5, 1.5, W - 3, H - 3, r - 1); g.stroke();
+  g.save(); g.beginPath(); g.roundRect(0, 0, W, H, r); g.clip();
+  g.fillStyle = "rgba(103,232,249,0.045)";
+  for (let y = 0; y < H; y += 8) g.fillRect(0, y, W, 2);
+  g.restore();
+  g.shadowColor = "#22d3ee"; g.shadowBlur = 18;
+  g.strokeStyle = "rgba(103,232,249,0.85)";
+  g.lineWidth = 4;
+  g.beginPath(); g.roundRect(4, 4, W - 8, H - 8, r - 4); g.stroke();
+  g.shadowBlur = 0;
 }
 
 function font(g: G, px: number, weight = 600): void { g.font = `${weight} ${Math.max(px, MIN_TEXT)}px ${FONT}`; }
 
 function button(g: G, z: Zone, state: "idle" | "hover" | "press", radius: number): void {
-  const active = !!z.active || !!z.primary;
+  const active = !!z.active || !!z.primary || !!z.danger;
   g.beginPath(); g.roundRect(z.x, z.y, z.w, z.h, radius);
-  if (state === "press") g.fillStyle = COLORS.accentDark;
-  else if (active) { const gr = g.createLinearGradient(0, z.y, 0, z.y + z.h); gr.addColorStop(0, state === "hover" ? "#60a5fa" : "#4f8ff7"); gr.addColorStop(1, state === "hover" ? "#3b82f6" : "#2f6fe0"); g.fillStyle = gr; }
-  else g.fillStyle = state === "hover" ? "rgba(96,165,250,0.30)" : "rgba(255,255,255,0.075)";
+  if (z.danger) g.fillStyle = state === "press" ? "#7f1d1d" : state === "hover" ? "#ef4444" : "#dc2626";
+  else if (state === "press") g.fillStyle = COLORS.accentDark;
+  else if (active) { const gr = g.createLinearGradient(0, z.y, 0, z.y + z.h); gr.addColorStop(0, state === "hover" ? "#67e8f9" : "#22b8d4"); gr.addColorStop(1, state === "hover" ? "#22d3ee" : "#0e8aa8"); g.fillStyle = gr; }
+  else g.fillStyle = state === "hover" ? "rgba(34,211,238,0.30)" : "rgba(103,232,249,0.08)";
   g.fill();
   g.lineWidth = state === "hover" ? 5 : 2;
-  g.strokeStyle = state === "hover" ? "#bfdbfe" : active ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.14)";
+  g.strokeStyle = state === "hover" ? "#cffafe" : active ? "rgba(255,255,255,0.35)" : "rgba(255,255,255,0.14)";
   g.stroke();
 }
 
-function chip(g: G, z: Zone, state: "idle" | "hover" | "press"): void {
-  button(g, { ...z, active: true }, state, z.h / 2);
+function glow(g: G, color: string, blur: number, fn: () => void): void { g.save(); g.shadowColor = color; g.shadowBlur = blur; fn(); g.restore(); }
+
+/** The Menu orb: concentric arc-reactor rings with the word Menu; the dot at the top is the link state. */
+function orb(g: G, z: Zone, state: "idle" | "hover" | "press"): void {
+  const cx = z.x + z.w / 2, cy = z.y + z.h / 2, R = z.w / 2 - 24;
+  const hot = state !== "idle";
   const link = z.sub === "ok" ? COLORS.ok : z.sub === "bad" ? COLORS.bad : COLORS.wait;
-  g.fillStyle = link;
-  g.beginPath(); g.arc(z.x + 52, z.y + z.h / 2, 16, 0, Math.PI * 2); g.fill();
-  if (z.icon) drawIcon(g, z.icon, z.x + 92, z.y + z.h / 2 - 34, 68, "#fff");
-  g.fillStyle = "#fff"; font(g, 62, 700); g.textBaseline = "middle"; g.textAlign = "left";
-  g.fillText(fit(g, z.label, 300), z.x + 176, z.y + z.h / 2 + 2);
-  g.fillStyle = "rgba(255,255,255,0.35)"; g.fillRect(z.x + 500, z.y + 40, 3, z.h - 80);
-  drawIcon(g, "menu", z.x + 530, z.y + z.h / 2 - 28, 56, "#fff");
-  g.fillStyle = "#fff"; font(g, 54, 600); g.fillText("Menu", z.x + 600, z.y + z.h / 2 + 2);
+  const body = g.createRadialGradient(cx, cy, 10, cx, cy, R);
+  body.addColorStop(0, state === "press" ? "#ffffff" : "rgba(207,250,254,0.95)"); body.addColorStop(0.35, "rgba(34,211,238,0.75)"); body.addColorStop(1, "rgba(8,60,86,0.85)");
+  glow(g, "#22d3ee", hot ? 46 : 28, () => { g.fillStyle = body; g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill(); });
+  g.strokeStyle = hot ? "#ecfeff" : "rgba(207,250,254,0.9)"; g.lineWidth = hot ? 9 : 6;
+  g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 5; g.strokeStyle = "rgba(255,255,255,0.7)";
+  g.beginPath(); g.arc(cx, cy, R * 0.74, 0, Math.PI * 2); g.stroke();
+  g.lineWidth = 12; g.strokeStyle = "rgba(8,47,73,0.7)";
+  for (let i = 0; i < 10; i++) { const a = (i / 10) * Math.PI * 2; g.beginPath(); g.arc(cx, cy, R * 0.87, a + 0.08, a + 0.5); g.stroke(); }
+  g.fillStyle = link; g.beginPath(); g.arc(cx, z.y + 22, 13, 0, Math.PI * 2); g.fill();
+  g.fillStyle = "#04283c"; font(g, 78, 800); g.textBaseline = "middle"; g.textAlign = "center";
+  g.fillText("Menu", cx, cy - 6);
+  g.fillStyle = "rgba(4,40,60,0.9)"; font(g, 46, 600);
+  g.fillText(fit(g, z.label, R * 1.1), cx, cy + 62);
+}
+
+function radialRing(g: G, W: number): void {
+  const c = W / 2;
+  g.save(); g.shadowColor = "#22d3ee"; g.shadowBlur = 20;
+  g.strokeStyle = "rgba(103,232,249,0.55)"; g.lineWidth = 4;
+  g.beginPath(); g.arc(c, c, 400, 0, Math.PI * 2); g.stroke();
+  g.strokeStyle = "rgba(251,191,36,0.55)"; g.lineWidth = 3; g.setLineDash([10, 14]);
+  g.beginPath(); g.arc(c, c, 215, 0, Math.PI * 2); g.stroke();
+  g.restore();
+}
+
+function radialButton(g: G, z: Zone, state: "idle" | "hover" | "press"): void {
+  const cx = z.x + z.w / 2, cy = z.y + z.h / 2, R = z.w / 2 - 6;
+  const hot = state !== "idle";
+  const amber = !!z.danger;
+  const base = amber ? "251,146,60" : "34,211,238";
+  glow(g, amber ? "#fb923c" : "#22d3ee", hot ? 40 : 18, () => {
+    g.fillStyle = state === "press" ? `rgba(${base},0.95)` : hot ? `rgba(${base},0.7)` : amber ? "rgba(60,24,6,0.9)" : "rgba(5,36,56,0.9)";
+    g.beginPath(); g.arc(cx, cy, R, 0, Math.PI * 2); g.fill();
+    g.strokeStyle = hot ? "#ffffff" : `rgba(${base},1)`; g.lineWidth = hot ? 8 : 5; g.stroke();
+  });
+  if (z.icon) drawIcon(g, z.icon, cx - 48, cy - 98, 96, "#fff");
+  g.fillStyle = "#fff"; g.textAlign = "center"; g.textBaseline = "middle";
+  font(g, 46, 700);
+  g.fillText(fit(g, z.label, R * 1.7), cx, cy + 62);
 }
 
 export function drawZones(g: G, W: number, H: number, zones: readonly Zone[], o: DrawOpts = {}): void {
   g.clearRect(0, 0, W, H);
-  if (o.chip) { for (const z of zones) chip(g, z, o.pressed === z.id ? "press" : o.hover === z.id ? "hover" : "idle"); return; }
+  const st = (z: Zone): "idle" | "hover" | "press" => (o.pressed === z.id ? "press" : o.hover === z.id ? "hover" : "idle");
+  if (o.look === "orb") { for (const z of zones) orb(g, z, st(z)); return; }
+  if (o.look === "radial") {
+    radialRing(g, W);
+    for (const z of zones) { if (z.id === "r:close") radialButton(g, { ...z, label: "Close", icon: "close" }, st(z)); else radialButton(g, z, st(z)); }
+    return;
+  }
   glass(g, W, H, 56);
   g.textBaseline = "middle";
   for (const z of zones) {

@@ -17,7 +17,9 @@ const defaults = {
   "guide1": "s=guide&step=0&hover=gNext",
   "guide5": "s=guide&step=4",
   "sheet": "s=sheet",
-  "chip": "s=chip&hover=menu",
+  "orb": "s=chip&hover=menu",
+  "radial": "s=radial&hover=r:modes",
+  "bars": "s=bars&hover=x",
 };
 const list = Object.keys(shots).length ? shots : defaults;
 const server = await createServer({ server: { host: "127.0.0.1", port: 5199, strictPort: true }, logLevel: "error" });

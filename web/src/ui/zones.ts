@@ -16,6 +16,8 @@ export interface Zone {
   active?: boolean;
   disabled?: boolean;
   primary?: boolean;
+  /** a destructive button (Close): drawn red */
+  danger?: boolean;
   /** text size in canvas px; the draw code never goes below MIN_TEXT */
   size?: number;
   /** a window id: the tile shows that panel's live picture when there is one */
