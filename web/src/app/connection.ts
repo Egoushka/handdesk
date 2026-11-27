@@ -1,8 +1,11 @@
-import { codecFromAnnexB, encode, parseServerText, parseVideoFrame, type ClientMessage, type DisplayInfo } from "../protocol";
+import { codecFromAnnexB, encode, parseServerText, parseVideoFrame, type ClientMessage, type DisplayInfo, type Hello } from "../protocol";
+import { parseMacMessage, type ServerMessage } from "../mac/state";
 
 export interface ConnectionEvents {
   onStatus(text: string): void;
-  onHello(displays: DisplayInfo[]): void;
+  onHello(displays: DisplayInfo[], hello: Hello): void;
+  onMessage(m: ServerMessage): void;
+  onConnected(on: boolean): void;
   /** called with a decoded frame for a display index; the callee must not keep the frame */
   onFrame(display: number, frame: VideoFrame): void;
 }
@@ -24,6 +27,8 @@ export class Connection {
   private ws: WebSocket | undefined;
   private decoders = new Map<number, { dec: VideoDecoder; codec: string; gotKey: boolean }>();
   private wanted: number[] = [0];
+  private wantedWindows: number[] = [];
+  private pingTimer: ReturnType<typeof setInterval> | undefined;
   private closed = false;
   private delay = 500;
   ready = false;
@@ -45,9 +50,15 @@ export class Connection {
         if (msg?.type === "hello") {
           this.ready = true;
           this.ev.onStatus(`Connected: ${msg.displays.length} display(s)`);
-          this.ev.onHello(msg.displays);
-          this.send({ type: "subscribe", displays: this.wanted });
+          this.ev.onConnected(true);
+          this.ev.onHello(msg.displays, msg);
+          this.send({ type: "subscribe", displays: this.wanted, windows: this.wantedWindows });
+          this.pingTimer ??= setInterval(() => this.send({ type: "ping", t: performance.now() }), 2000);
         } else if (msg?.type === "error") this.ev.onStatus(msg.message);
+        else {
+          const mm = parseMacMessage(m.data);
+          if (mm) this.ev.onMessage(mm);
+        }
         return;
       }
       const f = parseVideoFrame(m.data as ArrayBuffer);
@@ -55,6 +66,8 @@ export class Connection {
     };
     ws.onclose = () => {
       this.ready = false;
+      this.ev.onConnected(false);
+      if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = undefined; }
       for (const d of this.decoders.values()) { try { d.dec.close(); } catch { /* closed */ } }
       this.decoders.clear();
       if (this.closed) return;
@@ -64,9 +77,10 @@ export class Connection {
     };
   }
 
-  subscribe(displays: number[]): void {
+  subscribe(displays: number[], windows: number[] = this.wantedWindows): void {
     this.wanted = displays;
-    this.send({ type: "subscribe", displays });
+    this.wantedWindows = windows;
+    this.send({ type: "subscribe", displays, windows });
   }
 
   send(m: ClientMessage): void {
@@ -88,7 +102,7 @@ export class Connection {
           const old = this.decoders.get(display);
           this.decoders.delete(display);
           try { old?.dec.close(); } catch { /* already closed */ }
-          this.subscribe(this.wanted);
+          this.subscribe(this.wanted, this.wantedWindows);
         },
       });
       dec.configure({ codec, optimizeForLatency: true, hardwareAcceleration: "prefer-hardware" });

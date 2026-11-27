@@ -2,12 +2,22 @@ import type { KeyAction } from "./keyboard/session";
 import type { GestureEvent, Ray } from "./gesture/types";
 
 export interface DisplayInfo { id: number; name: string; x: number; y: number; width: number; height: number; pixelWidth: number; pixelHeight: number }
-export interface Hello { type: "hello"; version: number; displays: DisplayInfo[] }
+export interface Hello { type: "hello"; version: number; agent?: string; permissions?: { screenRecording: boolean; accessibility: boolean }; displays: DisplayInfo[] }
 
 export type ClientMessage =
-  | { type: "subscribe"; displays: number[] }
-  | { type: "move"; display: number; x: number; y: number }
-  | { type: "button"; display: number; button: "left" | "right"; down: boolean; x: number; y: number }
+  | { type: "subscribe"; displays: number[]; windows?: number[] }
+  | { type: "move"; display?: number; window?: number; x: number; y: number }
+  | { type: "button"; display?: number; window?: number; button: "left" | "right"; down: boolean; x: number; y: number }
+  | { type: "ping"; t: number }
+  | { type: "log"; level: "debug" | "info" | "warn"; message: string }
+  | { type: "windows" }
+  | { type: "apps" }
+  | { type: "app"; action: "launch" | "activate" | "quit"; bundleId: string }
+  | { type: "spotlight"; query: string }
+  | { type: "open"; id: number }
+  | { type: "virtualDisplay"; action: "add"; width: number; height: number; name: string }
+  | { type: "virtualDisplay"; action: "remove"; id: number }
+  | { type: "dimPhysical"; on: boolean }
   | { type: "scroll"; dx: number; dy: number }
   | { type: "magnify"; delta: number }
   | { type: "swipe"; direction: "left" | "right" | "up" | "down" }
@@ -62,7 +72,7 @@ export function keyActionToMessages(a: KeyAction): ClientMessage[] {
   ];
 }
 
-export interface Cursor { display: number; x: number; y: number }
+export interface Cursor { display: number; window?: number; x: number; y: number }
 
 /** Carries what a drag and a slow scroll need between events. */
 export interface MapperState {
@@ -78,7 +88,7 @@ export const newMapperState = (): MapperState => ({ scrollX: 0, scrollY: 0 });
  * picker). Clicks press and release in place; drags press at the pinch-onset ray and follow the hand.
  */
 export function gestureToMessages(ev: GestureEvent, hit: (ray: Ray) => Cursor | undefined, state: MapperState = newMapperState()): ClientMessage[] {
-  const at = (c: Cursor) => ({ display: c.display, x: c.x, y: c.y });
+  const at = (c: Cursor) => (c.window === undefined ? { display: c.display, x: c.x, y: c.y } : { window: c.window, x: c.x, y: c.y });
   switch (ev.type) {
     case "point":
     case "drag-move": {

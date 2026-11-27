@@ -46,6 +46,24 @@ public enum ClientMessage: Equatable {
     case ping(Double)
     /// A line from the page for the agent log (already stripped of control characters and capped).
     case log(level: LogLevel, message: String)
+    /// `subscribe` with a `windows` list (v0.2): display indexes plus CGWindowIDs.
+    case subscribeStreams(displays: [Int], windows: [UInt32])
+    case moveWindow(window: UInt32, x: Double, y: Double)
+    case buttonWindow(window: UInt32, button: MouseButton, down: Bool, x: Double, y: Double)
+    case windows
+    case virtualDisplay(VirtualDisplayAction)
+    case dimPhysical(Bool)
+    case apps
+    case app(action: AppAction, bundleId: String)
+    case spotlight(String)
+    case open(id: Int)
+
+    public static let maxWindowSubscriptions = 16
+    public static let maxQueryLength = 64
+
+    public static func validBundleId(_ s: String) -> Bool {
+        (1...128).contains(s.utf8.count) && s.utf8.allSatisfy { ($0 >= 48 && $0 <= 57) || ($0 >= 65 && $0 <= 90) || ($0 >= 97 && $0 <= 122) || $0 == 46 || $0 == 45 }
+    }
 
     public static func decode(_ data: Data) -> ClientMessage? {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -53,17 +71,33 @@ public enum ClientMessage: Equatable {
         func num(_ k: String) -> Double? { (obj[k] as? NSNumber).flatMap { $0 === kCFBooleanTrue || $0 === kCFBooleanFalse ? nil : $0.doubleValue } }
         func int(_ k: String) -> Int? { num(k).flatMap { $0.isFinite && abs($0) < 1e9 ? Int($0) : nil } }
         func fin(_ k: String) -> Double? { num(k).flatMap { $0.isFinite ? $0 : nil } }
+        func windowId(_ k: String) -> UInt32? { num(k).flatMap { $0.isFinite && $0 >= 1 && $0 <= Double(UInt32.max) && $0 == $0.rounded() ? UInt32($0) : nil } }
         func bool(_ k: String) -> Bool? { (obj[k] as? NSNumber).flatMap { $0 === kCFBooleanTrue ? true : ($0 === kCFBooleanFalse ? false : nil) } }
         switch type {
         case "subscribe":
-            guard let list = obj["displays"] as? [Any] else { return nil }
-            let ids = list.compactMap { ($0 as? NSNumber).flatMap { n -> Int? in let d = n.doubleValue; return d.isFinite && d >= 0 && d <= 255 ? Int(d) : nil } }
+            let rawDisplays = (obj["displays"] as? [Any]) ?? (obj["windows"] == nil ? nil : [])
+            guard let list = rawDisplays else { return nil }
+            // display indexes are 0...127: 128...255 are window streams (D23)
+            let ids = list.compactMap { ($0 as? NSNumber).flatMap { n -> Int? in let d = n.doubleValue; return d.isFinite && d >= 0 && d <= 127 ? Int(d) : nil } }
             guard ids.count == list.count, ids.count <= 64 else { return nil }
-            return .subscribe(ids)
+            guard let wl = obj["windows"] else { return .subscribe(ids) }
+            guard let wlist = wl as? [Any], wlist.count <= maxWindowSubscriptions else { return nil }
+            let wids = wlist.compactMap { ($0 as? NSNumber).flatMap { n -> UInt32? in let d = n.doubleValue; return d.isFinite && d >= 1 && d <= Double(UInt32.max) && d == d.rounded() ? UInt32(d) : nil } }
+            guard wids.count == wlist.count else { return nil }
+            return .subscribeStreams(displays: ids, windows: wids)
         case "move":
+            if obj["window"] != nil {
+                guard let w = windowId("window"), let x = fin("x"), let y = fin("y") else { return nil }
+                return .moveWindow(window: w, x: x, y: y)
+            }
             guard let d = int("display"), (0...255).contains(d), let x = fin("x"), let y = fin("y") else { return nil }
             return .move(display: d, x: x, y: y)
         case "button":
+            if obj["window"] != nil {
+                guard let w = windowId("window"), let b = (obj["button"] as? String).flatMap(MouseButton.init(rawValue:)),
+                      let down = bool("down"), let x = fin("x"), let y = fin("y") else { return nil }
+                return .buttonWindow(window: w, button: b, down: down, x: x, y: y)
+            }
             guard let d = int("display"), let b = (obj["button"] as? String).flatMap(MouseButton.init(rawValue:)),
                   let down = bool("down"), (0...255).contains(d), let x = fin("x"), let y = fin("y") else { return nil }
             return .button(display: d, button: b, down: down, x: x, y: y)
@@ -96,6 +130,35 @@ public enum ClientMessage: Equatable {
             guard let lv = (obj["level"] as? String).flatMap(LogLevel.init(name:)), lv <= .warn,
                   let m = obj["message"] as? String else { return nil }
             return .log(level: lv, message: LogScrub.clean(m, max: 256))
+        case "windows":
+            return .windows
+        case "virtualDisplay":
+            switch obj["action"] as? String {
+            case "add":
+                guard let w = int("width"), let h = int("height"), (640...7680).contains(w), (480...4320).contains(h) else { return nil }
+                let name = plain((obj["name"] as? String) ?? "handdesk", max: 32)
+                return .virtualDisplay(.add(width: w, height: h, name: name.isEmpty ? "handdesk" : name))
+            case "remove":
+                guard let id = windowId("id") else { return nil }
+                return .virtualDisplay(.remove(id: id))
+            default: return nil
+            }
+        case "dimPhysical":
+            guard let on = bool("on") else { return nil }
+            return .dimPhysical(on)
+        case "apps":
+            return .apps
+        case "app":
+            guard let a = (obj["action"] as? String).flatMap(AppAction.init(rawValue:)), let id = obj["bundleId"] as? String, validBundleId(id) else { return nil }
+            return .app(action: a, bundleId: id)
+        case "spotlight":
+            guard let q = obj["query"] as? String else { return nil }
+            let clean = plain(q, max: maxQueryLength).trimmingCharacters(in: .whitespaces)
+            guard !clean.isEmpty, q.utf16.count <= 1024 else { return nil }
+            return .spotlight(clean)
+        case "open":
+            guard let id = int("id"), id >= 1 else { return nil }
+            return .open(id: id)
         default:
             return nil
         }

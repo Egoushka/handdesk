@@ -111,3 +111,17 @@ export function run(
 export const types = (ev: GestureEvent[]): string[] => ev.map((e) => e.type);
 export const ofType = <T extends GestureEvent["type"]>(ev: GestureEvent[], t: T): Extract<GestureEvent, { type: T }>[] =>
   ev.filter((e): e is Extract<GestureEvent, { type: T }> => e.type === t);
+
+/** Turn a hand about the forward axis through its wrist (roll). pi turns a palm-down hand palm-up. */
+export function rollHand(h: HandFrame, angle: number): HandFrame {
+  const w = h.joints.wrist!;
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
+  const joints: HandFrame["joints"] = {};
+  for (const [k, p] of Object.entries(h.joints) as [JointName, Vec3][]) {
+    const dx = p.x - w.x;
+    const dy = p.y - w.y;
+    joints[k] = { x: w.x + dx * c - dy * s, y: w.y + dx * s + dy * c, z: p.z };
+  }
+  return { ...h, joints };
+}

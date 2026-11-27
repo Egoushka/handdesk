@@ -45,11 +45,18 @@ I wanted a large desktop I can fly around in and work with my hands: click icons
 | L shape (thumb and index out), change the gap | zoom (Cmd + / Cmd -) |
 | Index, middle, ring out, swipe 10 cm | left/right: Ctrl-Left/Right (Spaces); up: Mission Control; down: App Expose |
 | Both hands pinching | move, turn and resize the panel |
+| Fingertip within 3 cm of a panel, then through it | touch: tap and drag, like a touchscreen |
+| Left palm up for 0.4 s | cheat sheet and menu (environment, recenter, save layout, keyboard, desk, launcher) |
+| Far pinch on a panel's yellow handle | scale (corners), curve (bottom), move (top bar) |
 
 - Virtual keyboard: ten fingers on the desk, English and Ukrainian (ЙЦУКЕН), sticky Cmd, Ctrl, Opt and Shift, a click sound and a key highlight on each press, a word-suggestion strip and an autocorrect that snaps an edge press to the likely key. All local, no cloud. Your Bluetooth keyboard keeps working.
+- Your hands are drawn from all 25 joints, with a ring that closes as you pinch, and a red notice when tracking is lost. The first time, a short overlay says how to start; the cheat sheet is always one palm-up away.
+- Environments: passthrough, dim passthrough, night sky, grid. The layout (panel positions, sizes, curve, desk) is saved from the menu and restored on start.
+- The Mac as a machine: the launcher panel lists running apps and windows and searches Spotlight as you type on the virtual keyboard. A window becomes its own panel, and touching it focuses that window. The launcher also adds or removes virtual displays and can dim the Mac's own screen.
+- The agent keeps a JSON log at `~/Library/Logs/handdesk.log` (connects, disconnects, errors; `--log-level debug` adds input types, never typed text or the token). `handdesk logs` tails it.
 - Typing never shows up as clicks: hands low over the keyboard are kept out of the pointer gestures.
 
-Not here yet: creating a virtual display, audio, clipboard sync. Thresholds are starting values that I have not tuned on a headset.
+Not here yet: Mac audio, clipboard sync, notifications in space and dictation (v0.3). Thresholds are starting values that I have not tuned on a headset.
 
 ## Quick start
 
@@ -62,7 +69,7 @@ scripts/handdesk start
 
 It prints a URL such as `http://localhost:8787/?t=<pairing token>`. Open exactly that URL in the Quest Browser, then press Enter AR. The agent runs `adb reverse tcp:8787 tcp:8787`, so `localhost` on the headset is the Mac: `localhost` counts as a secure context, which WebXR requires, so there is no certificate to accept.
 
-`scripts/handdesk doctor` shows which permissions are missing. macOS asks for two, and only you can grant them: Screen Recording (to capture the displays) and Accessibility (to post mouse and key events). `scripts/handdesk launchagent install` keeps the agent running at login.
+`scripts/handdesk doctor` shows which permissions are missing. macOS asks for two, and only you can grant them: Screen Recording (to capture the displays) and Accessibility (to post mouse and key events). `scripts/handdesk launchagent install` keeps the agent running at login. `scripts/handdesk wifi` (headset on USB once) switches adb to Wi-Fi, and `scripts/handdesk open` opens the page on the headset. The build signs the binary with a local identity, so the permissions survive rebuilds (decision D21).
 
 A prebuilt Mac package (agent plus page) is attached to each [release](https://github.com/Egoushka/handdesk/releases).
 

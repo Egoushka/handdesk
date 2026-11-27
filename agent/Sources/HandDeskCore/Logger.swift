@@ -177,6 +177,20 @@ extension ClientMessage {
         case let .text(t): return ["type": "text", "length": t.utf16.count]
         case .ping: return ["type": "ping"]
         case let .log(level, m): return ["type": "log", "level": level.name, "length": m.count]
+        case let .subscribeStreams(d, w): return ["type": "subscribe", "displays": d, "windows": w.count]
+        case .moveWindow: return ["type": "move", "target": "window"]
+        case let .buttonWindow(_, b, down, _, _): return ["type": "button", "target": "window", "button": b.rawValue, "down": down]
+        case .windows: return ["type": "windows"]
+        case let .virtualDisplay(a):
+            switch a {
+            case let .add(w, h, _): return ["type": "virtualDisplay", "action": "add", "width": w, "height": h]
+            case let .remove(id): return ["type": "virtualDisplay", "action": "remove", "id": Int(id)]
+            }
+        case let .dimPhysical(on): return ["type": "dimPhysical", "on": on]
+        case .apps: return ["type": "apps"]
+        case let .app(action, bundleId): return ["type": "app", "action": action.rawValue, "bundleId": bundleId]
+        case let .spotlight(q): return ["type": "spotlight", "length": q.utf16.count]
+        case let .open(id): return ["type": "open", "id": id]
         }
     }
 }

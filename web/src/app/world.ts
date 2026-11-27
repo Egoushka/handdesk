@@ -1,5 +1,10 @@
 import * as THREE from "three";
 import type { Panel } from "../panel";
+import type { HandFrame, Vec3 } from "../gesture/types";
+import { BONES, pinchStrength } from "../hands/rig";
+import type { Row } from "../mac/state";
+import type { EnvId } from "../space/layout";
+import type { Handle } from "../space/handles";
 import type { TypingPlane } from "../keyboard/plane";
 import type { Key, Lang, Modifier } from "../keyboard/layouts";
 import { PITCH } from "../keyboard/layouts";
@@ -66,61 +71,6 @@ export class PanelView {
     }
     this.mesh.position.set(p.center.x, p.center.y, p.center.z);
     this.mesh.rotation.set(0, p.yaw, 0);
-  }
-}
-
-export interface ToolbarButton { id: string; label: string; active?: boolean }
-
-/** A small floating toolbar, picked with the same ray math as a panel. */
-export class ToolbarView {
-  readonly canvas = document.createElement("canvas");
-  readonly mesh: THREE.Mesh;
-  readonly panel: Panel;
-  private readonly texture: THREE.CanvasTexture;
-  buttons: ToolbarButton[] = [];
-  status = "";
-
-  constructor(center: { x: number; y: number; z: number }, yaw: number) {
-    this.canvas.width = 1024;
-    this.canvas.height = 160;
-    this.panel = { display: -1, center, yaw, width: 0.8, height: 0.125, curve: 0 };
-    this.texture = new THREE.CanvasTexture(this.canvas);
-    this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(this.panel.width, this.panel.height), new THREE.MeshBasicMaterial({ map: this.texture, transparent: true }));
-    this.sync();
-  }
-
-  sync(): void {
-    const p = this.panel;
-    this.mesh.position.set(p.center.x, p.center.y, p.center.z);
-    this.mesh.rotation.set(0, p.yaw, 0);
-  }
-
-  /** button under normalized x */
-  buttonAt(x: number): ToolbarButton | undefined {
-    const i = Math.floor(x * this.buttons.length);
-    return this.buttons[i];
-  }
-
-  render(): void {
-    const c = this.canvas.getContext("2d")!;
-    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
-    const n = this.buttons.length;
-    const bw = this.canvas.width / n;
-    this.buttons.forEach((b, i) => {
-      c.fillStyle = b.active ? "#3b82f6" : "#2a303b";
-      c.beginPath();
-      c.roundRect(i * bw + 6, 6, bw - 12, 100, 18);
-      c.fill();
-      c.fillStyle = "#fff";
-      c.font = "34px system-ui";
-      c.textAlign = "center";
-      c.fillText(b.label, i * bw + bw / 2, 68);
-    });
-    c.fillStyle = "#cbd5e1";
-    c.font = "28px system-ui";
-    c.fillText(this.status, this.canvas.width / 2, 146);
-    this.texture.needsUpdate = true;
   }
 }
 
@@ -238,33 +188,6 @@ export class KeyboardView {
   }
 }
 
-export function makeEnvironment(): THREE.Object3D {
-  const g = new THREE.Group();
-  const sky = new THREE.Mesh(
-    new THREE.SphereGeometry(30, 32, 16),
-    new THREE.ShaderMaterial({
-      side: THREE.BackSide,
-      depthWrite: false,
-      uniforms: {},
-      vertexShader: "varying vec3 vp; void main(){ vp = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} ",
-      fragmentShader: "varying vec3 vp; void main(){ float t = clamp(normalize(vp).y*0.5+0.5, 0.0, 1.0); gl_FragColor = vec4(mix(vec3(0.04,0.05,0.08), vec3(0.14,0.18,0.28), t), 1.0);} ",
-    }),
-  );
-  sky.renderOrder = -10;
-  g.add(sky);
-  const grid = new THREE.GridHelper(40, 80, 0x3b4658, 0x222a38);
-  g.add(grid);
-  g.visible = false;
-  return g;
-}
-
-export function makeTipDots(count: number): THREE.InstancedMesh {
-  const m = new THREE.InstancedMesh(new THREE.SphereGeometry(0.006, 10, 8), new THREE.MeshBasicMaterial({ color: 0x93c5fd }), count);
-  m.count = 0;
-  m.frustumCulled = false;
-  return m;
-}
-
 export function clickSound(ctx: AudioContext): void {
   const len = Math.floor(ctx.sampleRate * 0.025);
   const buf = ctx.createBuffer(1, len, ctx.sampleRate);
@@ -276,4 +199,256 @@ export function clickSound(ctx: AudioContext): void {
   g.gain.value = 0.35;
   src.connect(g).connect(ctx.destination);
   src.start();
+}
+
+// ---- environments ----
+export interface Environments { group: THREE.Group; set(e: EnvId): void }
+
+export function makeEnvironments(): Environments {
+  const group = new THREE.Group();
+  const veil = new THREE.Mesh(new THREE.SphereGeometry(20, 24, 12), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.55, side: THREE.BackSide, depthWrite: false }));
+  veil.renderOrder = -10;
+  const sky = (top: number, bottom: number) =>
+    new THREE.Mesh(
+      new THREE.SphereGeometry(30, 32, 16),
+      new THREE.ShaderMaterial({
+        side: THREE.BackSide,
+        depthWrite: false,
+        uniforms: { top: { value: new THREE.Color(top) }, bottom: { value: new THREE.Color(bottom) } },
+        vertexShader: "varying vec3 vp; void main(){ vp = position; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0);} ",
+        fragmentShader: "uniform vec3 top; uniform vec3 bottom; varying vec3 vp; void main(){ float t = clamp(normalize(vp).y*0.5+0.5, 0.0, 1.0); gl_FragColor = vec4(mix(bottom, top, t), 1.0);} ",
+      }),
+    );
+  const night = new THREE.Group();
+  const nightSky = sky(0x02030a, 0x0b1020);
+  nightSky.renderOrder = -10;
+  const pts: number[] = [];
+  for (let i = 0; i < 900; i++) {
+    const u = Math.random() * 2 - 1;
+    const th = Math.random() * Math.PI * 2;
+    const r = Math.sqrt(1 - u * u);
+    pts.push(Math.cos(th) * r * 25, Math.abs(u) * 25 * 0.9 + 0.5, Math.sin(th) * r * 25);
+  }
+  const starGeo = new THREE.BufferGeometry();
+  starGeo.setAttribute("position", new THREE.Float32BufferAttribute(pts, 3));
+  night.add(nightSky, new THREE.Points(starGeo, new THREE.PointsMaterial({ color: 0xffffff, size: 0.12, sizeAttenuation: true, depthWrite: false })));
+  const grid = new THREE.Group();
+  const gridSky = sky(0x14182a, 0x0a0c14);
+  gridSky.renderOrder = -10;
+  grid.add(gridSky, new THREE.GridHelper(40, 80, 0x3b4658, 0x222a38));
+  group.add(veil, night, grid);
+  const set = (e: EnvId) => {
+    veil.visible = e === "dim";
+    night.visible = e === "night";
+    grid.visible = e === "grid";
+  };
+  set("passthrough");
+  return { group, set };
+}
+
+// ---- hands ----
+const JOINT_ORDER = [
+  "wrist",
+  "thumb-metacarpal", "thumb-phalanx-proximal", "thumb-phalanx-distal", "thumb-tip",
+  "index-finger-metacarpal", "index-finger-phalanx-proximal", "index-finger-phalanx-intermediate", "index-finger-phalanx-distal", "index-finger-tip",
+  "middle-finger-metacarpal", "middle-finger-phalanx-proximal", "middle-finger-phalanx-intermediate", "middle-finger-phalanx-distal", "middle-finger-tip",
+  "ring-finger-metacarpal", "ring-finger-phalanx-proximal", "ring-finger-phalanx-intermediate", "ring-finger-phalanx-distal", "ring-finger-tip",
+  "pinky-finger-metacarpal", "pinky-finger-phalanx-proximal", "pinky-finger-phalanx-intermediate", "pinky-finger-phalanx-distal", "pinky-finger-tip",
+] as const;
+const BASE = new THREE.Color(0x8ab4f8);
+const GLOW = new THREE.Color(0xffffff);
+const CLOSED = new THREE.Color(0x4ade80);
+
+/** Both hands from all 25 joints: spheres, capsule-like bones, tip glow, pinch ring. They write depth, so panels and hands hide each other. */
+export class HandsView {
+  readonly group = new THREE.Group();
+  private readonly joints = new THREE.InstancedMesh(new THREE.SphereGeometry(1, 10, 8), new THREE.MeshBasicMaterial(), 50);
+  private readonly bones = new THREE.InstancedMesh(new THREE.CylinderGeometry(1, 1, 1, 8, 1), new THREE.MeshBasicMaterial({ color: 0x5b7fc7 }), 2 * BONES.length);
+  private readonly rings = [0, 1].map(() => new THREE.Mesh(new THREE.TorusGeometry(1, 0.08, 8, 24), new THREE.MeshBasicMaterial({ color: 0x4ade80 })));
+
+  constructor() {
+    for (const m of [this.joints, this.bones]) { m.frustumCulled = false; m.count = 0; this.group.add(m); }
+    for (const r of this.rings) { r.visible = false; this.group.add(r); }
+  }
+
+  /** glow(handIndex, jointName) is 0..1 */
+  update(hands: HandFrame[], glow: (h: HandFrame, joint: string) => number): void {
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const up = new THREE.Vector3(0, 1, 0);
+    let nj = 0;
+    let nb = 0;
+    const col = new THREE.Color();
+    hands.slice(0, 2).forEach((h, hi) => {
+      for (const name of JOINT_ORDER) {
+        const p = h.joints[name];
+        if (!p) continue;
+        const tip = name.endsWith("tip");
+        const r = tip ? 0.0075 : 0.0095;
+        m.compose(new THREE.Vector3(p.x, p.y, p.z), q.identity(), new THREE.Vector3(r, r, r));
+        this.joints.setMatrixAt(nj, m);
+        const g = tip ? glow(h, name) : 0;
+        this.joints.setColorAt(nj, col.copy(BASE).lerp(GLOW, g));
+        nj++;
+      }
+      for (const [a, b] of BONES) {
+        const pa = h.joints[a];
+        const pb = h.joints[b];
+        if (!pa || !pb) continue;
+        const va = new THREE.Vector3(pa.x, pa.y, pa.z);
+        const vb = new THREE.Vector3(pb.x, pb.y, pb.z);
+        const dir = vb.clone().sub(va);
+        const len = dir.length();
+        if (len < 1e-4) continue;
+        q.setFromUnitVectors(up, dir.normalize());
+        m.compose(va.add(vb).multiplyScalar(0.5), q, new THREE.Vector3(0.0055, len, 0.0055));
+        this.bones.setMatrixAt(nb++, m);
+      }
+      const ring = this.rings[hi]!;
+      const t = h.joints["thumb-tip"];
+      const i = h.joints["index-finger-tip"];
+      const strength = pinchStrength(h);
+      if (t && i && strength > 0.05) {
+        ring.visible = true;
+        ring.position.set((t.x + i.x) / 2, (t.y + i.y) / 2, (t.z + i.z) / 2);
+        const s = 0.025 - 0.018 * strength;
+        ring.scale.set(s, s, s);
+        (ring.material as THREE.MeshBasicMaterial).color.copy(strength >= 1 ? CLOSED : BASE);
+        ring.lookAt(ring.position.x, ring.position.y + 1, ring.position.z);
+      } else ring.visible = false;
+    });
+    this.joints.count = nj;
+    this.bones.count = nb;
+    this.joints.instanceMatrix.needsUpdate = true;
+    if (this.joints.instanceColor) this.joints.instanceColor.needsUpdate = true;
+    this.bones.instanceMatrix.needsUpdate = true;
+  }
+}
+
+// ---- text and list panels ----
+export class Billboard {
+  readonly canvas = document.createElement("canvas");
+  readonly mesh: THREE.Mesh;
+  private readonly texture: THREE.CanvasTexture;
+  private text = "\u0000";
+  constructor(width: number, height: number, private readonly size = 40, private readonly bg = "rgba(15,23,42,0.85)") {
+    this.canvas.width = 1024;
+    this.canvas.height = Math.round(1024 * (height / width));
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false }));
+    this.mesh.renderOrder = 5;
+    this.mesh.visible = false;
+  }
+  setText(t: string): void {
+    if (t === this.text) return;
+    this.text = t;
+    const c = this.canvas.getContext("2d")!;
+    c.clearRect(0, 0, this.canvas.width, this.canvas.height);
+    c.fillStyle = this.bg;
+    c.beginPath();
+    c.roundRect(0, 0, this.canvas.width, this.canvas.height, 36);
+    c.fill();
+    c.fillStyle = "#f8fafc";
+    c.font = `${this.size}px system-ui`;
+    c.textAlign = "center";
+    c.textBaseline = "middle";
+    c.fillText(t, this.canvas.width / 2, this.canvas.height / 2, this.canvas.width - 40);
+    this.texture.needsUpdate = true;
+  }
+  place(p: Vec3, camera: THREE.Camera): void {
+    this.mesh.position.set(p.x, p.y, p.z);
+    this.mesh.quaternion.copy(camera.quaternion);
+  }
+}
+
+/** A vertical list: rows are drawn top to bottom in equal slots; headers are not clickable. */
+export class UiPanel {
+  readonly canvas = document.createElement("canvas");
+  readonly mesh: THREE.Mesh;
+  readonly panel: Panel;
+  rows: Row[] = [];
+  private readonly texture: THREE.CanvasTexture;
+  private sig = "";
+  visible = false;
+  constructor(readonly id: string, width: number, height: number, private readonly rowCount: number) {
+    this.canvas.width = 1024;
+    this.canvas.height = Math.round(1024 * (height / width));
+    this.panel = { display: -1, center: { x: 0, y: 1.2, z: -1 }, yaw: 0, width, height, curve: 0 };
+    this.texture = new THREE.CanvasTexture(this.canvas);
+    this.texture.colorSpace = THREE.SRGBColorSpace;
+    this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(width, height), new THREE.MeshBasicMaterial({ map: this.texture, transparent: true, depthWrite: false }));
+    this.mesh.renderOrder = 4;
+    this.mesh.visible = false;
+  }
+  show(on: boolean): void { this.visible = on; this.mesh.visible = on; }
+  sync(): void {
+    this.mesh.position.set(this.panel.center.x, this.panel.center.y, this.panel.center.z);
+    this.mesh.rotation.set(0, this.panel.yaw, 0);
+  }
+  /** rows are laid out in `rowCount` equal slots (the list may be shorter) */
+  slots(): number { return this.rowCount; }
+  setRows(rows: Row[], hover = -1): void {
+    this.rows = rows;
+    const sig = JSON.stringify([rows.map((r) => [r.text, r.sub, r.header]), hover]);
+    if (sig === this.sig) return;
+    this.sig = sig;
+    const c = this.canvas.getContext("2d")!;
+    const W = this.canvas.width;
+    const H = this.canvas.height;
+    c.clearRect(0, 0, W, H);
+    c.fillStyle = "rgba(15,23,42,0.92)";
+    c.beginPath();
+    c.roundRect(0, 0, W, H, 40);
+    c.fill();
+    const rh = H / this.rowCount;
+    rows.forEach((r, i) => {
+      const y = i * rh;
+      if (!r.header && r.action) {
+        c.fillStyle = i === hover ? "#3b82f6" : "#1e293b";
+        c.beginPath();
+        c.roundRect(16, y + 4, W - 32, rh - 8, 14);
+        c.fill();
+      }
+      c.fillStyle = r.header ? "#94a3b8" : "#f8fafc";
+      c.font = `${Math.round(rh * (r.header ? 0.5 : 0.56))}px system-ui`;
+      c.textAlign = "left";
+      c.textBaseline = "middle";
+      c.fillText(r.text, 40, y + rh / 2, W - 360);
+      if (r.sub) {
+        c.fillStyle = "#94a3b8";
+        c.textAlign = "right";
+        c.fillText(r.sub, W - 40, y + rh / 2, 300);
+      }
+    });
+    this.texture.needsUpdate = true;
+  }
+}
+
+// ---- handles and touch dots ----
+export class HandleDots {
+  readonly mesh = new THREE.InstancedMesh(new THREE.SphereGeometry(0.025, 12, 8), new THREE.MeshBasicMaterial({ color: 0xfbbf24, transparent: true, opacity: 0.9 }), 64);
+  constructor() { this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = 6; }
+  set(handles: Handle[]): void {
+    const m = new THREE.Matrix4();
+    handles.slice(0, 64).forEach((h, i) => { m.setPosition(h.pos.x, h.pos.y, h.pos.z); this.mesh.setMatrixAt(i, m); });
+    this.mesh.count = Math.min(64, handles.length);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
+}
+
+export class TouchDots {
+  readonly mesh = new THREE.InstancedMesh(new THREE.CircleGeometry(0.012, 16), new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.85, side: THREE.DoubleSide }), 10);
+  constructor() { this.mesh.count = 0; this.mesh.frustumCulled = false; this.mesh.renderOrder = 6; }
+  set(dots: { pos: Vec3; yaw: number; down: boolean }[]): void {
+    const m = new THREE.Matrix4();
+    dots.slice(0, 10).forEach((d, i) => {
+      m.makeRotationY(d.yaw);
+      m.setPosition(d.pos.x, d.pos.y, d.pos.z);
+      m.scale(new THREE.Vector3(d.down ? 0.6 : 1, d.down ? 0.6 : 1, 1));
+      this.mesh.setMatrixAt(i, m);
+    });
+    this.mesh.count = Math.min(10, dots.length);
+    this.mesh.instanceMatrix.needsUpdate = true;
+  }
 }

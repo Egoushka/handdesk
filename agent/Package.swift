@@ -7,7 +7,8 @@ let package = Package(
     products: [.executable(name: "handdesk", targets: ["handdesk"])],
     targets: [
         .target(name: "HandDeskCore"),
-        .executableTarget(name: "handdesk", dependencies: ["HandDeskCore"]),
+        .target(name: "CVD"),
+        .executableTarget(name: "handdesk", dependencies: ["HandDeskCore", "CVD"]),
         .executableTarget(name: "core-tests", dependencies: ["HandDeskCore"], path: "Tests/CoreTests"),
     ]
 )

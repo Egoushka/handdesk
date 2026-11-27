@@ -2,6 +2,9 @@ import Foundation
 import CoreGraphics
 import ApplicationServices
 import HandDeskCore
+import CVD
+
+nonisolated(unsafe) var signalSources: [DispatchSourceSignal] = []
 
 setvbuf(stdout, nil, _IOLBF, 0)
 
@@ -107,10 +110,18 @@ case "start":
     // the pairing URL is shown only to a terminal; under launchd it would end up in a log file (use `handdesk open`)
     if isatty(1) != 0 { print("Open on the Quest: http://localhost:\(config.port)/?t=\(config.token)") }
     else { print("Pairing URL not printed (not a terminal): run `handdesk open` to open it on the headset") }
+    for sig in [SIGINT, SIGTERM] {
+        signal(sig, SIG_IGN)
+        let src = DispatchSource.makeSignalSource(signal: sig, queue: .main)
+        src.setEventHandler { server.shutdown(); log.info("stop", ["signal": Int(sig)]); exit(0) }
+        src.resume()
+        signalSources.append(src)
+    }
     RunLoop.main.run()
 case "doctor":
     permissionLines().forEach { print($0) }
     print("Displays: \(Displays.list().map { "\($0.name) \(Int($0.width))x\(Int($0.height))" }.joined(separator: ", "))")
+    print("Virtual displays: \(cvd_available() ? "available (private CoreGraphics API present)" : "not available on this macOS")")
     print("adb: \(["/opt/homebrew/bin/adb", "/usr/local/bin/adb"].first { FileManager.default.isExecutableFile(atPath: $0) } ?? "not found")")
 case "token":
     do { print(try Token.loadOrCreate(at: tokenURL)) } catch { fail("cannot read the pairing token: \(error.localizedDescription)") }

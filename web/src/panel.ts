@@ -4,6 +4,8 @@ import type { Ray, Vec3 } from "./gesture/types";
 export interface Panel {
   /** index into the agent's display list */
   display: number;
+  /** set for a macOS window panel; display is then -2 */
+  windowId?: number;
   center: Vec3;
   /** radians about the y axis */
   yaw: number;
@@ -13,19 +15,23 @@ export interface Panel {
   curve: number;
 }
 
-export interface Hit { display: number; x: number; y: number; t: number }
+export interface Hit { display: number; window?: number; x: number; y: number; t: number }
 
-function toLocal(p: Vec3, panel: Panel): Vec3 {
+export function toLocal(p: Vec3, panel: Panel): Vec3 {
   const d = { x: p.x - panel.center.x, y: p.y - panel.center.y, z: p.z - panel.center.z };
   const c = Math.cos(-panel.yaw);
   const s = Math.sin(-panel.yaw);
   return { x: d.x * c + d.z * s, y: d.y, z: -d.x * s + d.z * c };
 }
 
-function dirToLocal(d: Vec3, panel: Panel): Vec3 {
+export function dirToLocal(d: Vec3, panel: Panel): Vec3 {
   const c = Math.cos(-panel.yaw);
   const s = Math.sin(-panel.yaw);
   return { x: d.x * c + d.z * s, y: d.y, z: -d.x * s + d.z * c };
+}
+
+function hit(panel: Panel, x: number, y: number, t: number): Hit {
+  return panel.windowId === undefined ? { display: panel.display, x, y, t } : { display: panel.display, window: panel.windowId, x, y, t };
 }
 
 /** Where a ray meets the panel, as display coordinates 0..1 with a top-left origin; undefined on a miss. */
@@ -38,7 +44,7 @@ export function intersect(ray: Ray, panel: Panel): Hit | undefined {
     const x = o.x + t * d.x;
     const y = o.y + t * d.y;
     if (Math.abs(x) > panel.width / 2 || Math.abs(y) > panel.height / 2) return undefined;
-    return { display: panel.display, x: x / panel.width + 0.5, y: 0.5 - y / panel.height, t };
+    return hit(panel, x / panel.width + 0.5, 0.5 - y / panel.height, t);
   }
   const R = panel.width / panel.curve;
   // circle in the xz plane centred at (0, R) with radius R; the viewer is inside it
@@ -58,7 +64,7 @@ export function intersect(ray: Ray, panel: Panel): Hit | undefined {
   const hy = o.y + t * d.y;
   const phi = Math.atan2(hx, R - hz);
   if (Math.abs(phi) > panel.curve / 2 || Math.abs(hy) > panel.height / 2 || R - hz <= 0) return undefined;
-  return { display: panel.display, x: phi / panel.curve + 0.5, y: 0.5 - hy / panel.height, t };
+  return hit(panel, phi / panel.curve + 0.5, 0.5 - hy / panel.height, t);
 }
 
 /** The nearest panel the ray hits. */
@@ -81,4 +87,23 @@ export function applyGrab(start: Panel, center: Vec3, scale: number, yaw: number
     width: start.width * s,
     height: start.height * s,
   };
+}
+
+export function pickPanel<P extends Panel>(ray: Ray, panels: P[]): { panel: P; hit: Hit } | undefined {
+  let best: { panel: P; hit: Hit } | undefined;
+  for (const panel of panels) {
+    const h = intersect(ray, panel);
+    if (h && (!best || h.t < best.hit.t)) best = { panel, hit: h };
+  }
+  return best;
+}
+
+/** Local-frame coordinates of the point where the ray crosses the panel's flat plane (z = 0), ignoring bounds. */
+export function planePoint(ray: Ray, panel: Panel): Vec3 | undefined {
+  const o = toLocal(ray.origin, panel);
+  const d = dirToLocal(ray.direction, panel);
+  if (Math.abs(d.z) < 1e-9) return undefined;
+  const t = -o.z / d.z;
+  if (t <= 0) return undefined;
+  return { x: o.x + t * d.x, y: o.y + t * d.y, z: 0 };
 }
