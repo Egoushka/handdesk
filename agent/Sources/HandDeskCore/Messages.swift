@@ -42,6 +42,10 @@ public enum ClientMessage: Equatable {
     case swipe(SwipeDirection)
     case key(code: String, down: Bool, modifiers: Modifiers)
     case text(String)
+    /// Latency probe: the server answers `pong` with the same `t`.
+    case ping(Double)
+    /// A line from the page for the agent log (already stripped of control characters and capped).
+    case log(level: LogLevel, message: String)
 
     public static func decode(_ data: Data) -> ClientMessage? {
         guard let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
@@ -85,6 +89,13 @@ public enum ClientMessage: Equatable {
         case "text":
             guard let t = obj["text"] as? String, !t.isEmpty, t.utf16.count <= 256 else { return nil }
             return .text(t)
+        case "ping":
+            guard let t = fin("t") else { return nil }
+            return .ping(t)
+        case "log":
+            guard let lv = (obj["level"] as? String).flatMap(LogLevel.init(name:)), lv <= .warn,
+                  let m = obj["message"] as? String else { return nil }
+            return .log(level: lv, message: LogScrub.clean(m, max: 256))
         default:
             return nil
         }

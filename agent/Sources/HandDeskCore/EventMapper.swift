@@ -34,7 +34,7 @@ public final class EventMapper {
 
     public func handle(_ message: ClientMessage) {
         switch message {
-        case .subscribe:
+        case .subscribe, .ping, .log:
             break // owned by the server
         case let .move(d, x, y):
             guard let disp = display(d) else { return }

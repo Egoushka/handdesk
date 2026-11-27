@@ -42,7 +42,7 @@ final class DisplayStream: NSObject, SCStreamOutput, SCStreamDelegate {
 
     func stop() {
         let s = stream; stream = nil
-        Task { try? await s?.stopCapture() }
+        Task { do { try await s?.stopCapture() } catch { log.error("error", ["where": "capture_stop", "display": index, "message": error.localizedDescription]) } }
         encoder?.stop(); encoder = nil
     }
 
@@ -55,6 +55,6 @@ final class DisplayStream: NSObject, SCStreamOutput, SCStreamDelegate {
     }
 
     func stream(_ stream: SCStream, didStopWithError error: Error) {
-        FileHandle.standardError.write(Data("capture stopped: \(error.localizedDescription)\n".utf8))
+        log.error("error", ["where": "capture_stopped", "display": index, "message": error.localizedDescription])
     }
 }

@@ -55,17 +55,17 @@ The Mac has only the Command Line Tools: no XCTest, and the Swift Testing macros
 ## D15 Gate review fixes (2026-11-26)
 An independent review of the whole repo found one high correctness bug (a left button left held when a drag ended over nothing or a session dropped) and several medium ones (unbounded numbers in the agent, no connection cap, thumb typing Space anywhere, no Ukrainian full stop or apostrophe, a LaunchAgent with no web path). All fixed with tests. Not done: build attestation for release files and code signing, listed as open in THREAT-MODEL.md.
 
-## D16 v0.2 ships onboarding, hands, space and reliability; the headless-Mac list is v0.3 (2026-11-27)
-The feedback has two halves: the headset experience (instructions, visible hands, immersion, control) and "treat the Mac as a machine behind the headset". The first half and the invisible-agent problem are cheap and certain, so they ship first. Window-per-panel capture, CGVirtualDisplay, launcher, audio, clipboard, notifications and dictation each need a Mac-side private or permissioned API (CGVirtualDisplay is undocumented, audio needs its own capture permission) and a design for the headset side; bundling them would delay the fixes Yehor asked for. Reverse if: the headless Mac becomes the main use; start v0.3 with virtual displays since it changes the capture model.
+## D16 v0.2 scope: lean core of immersive and Mac-as-machine (2026-11-27)
+Feedback: no in-headset instructions, hands not visible, not immersive or controllable enough, the Mac is a machine and not a screen, and the agent log was silent. The budget is limited, so each part is the lean version: a first-run overlay and a palm-up cheat sheet instead of an animated tour; four environments; handles, recenter, direct touch and one saved layout; virtual displays, window panels and a launcher on the Mac side. Deferred to one issue: Mac audio, clipboard, notifications, dictation, the animated tour, saved layouts per room. Virtual displays and window capture change the capture model, so they came before the rest of the deferred list.
 
-## D17 Tour confirms by doing, using the classifier's own events
-A step is done when the real classifier emits the event the step teaches. That makes the tour a live test of tracking on his hands, and a gesture that never completes is visible straight away. A skip is always in the palm-up menu.
+## D17 First run is one overlay, not a tour
+An animated tour that confirms each gesture is the better teacher, but it is the most code. The overlay names the four things that matter (point, pinch, two-hand move, palm-up cheat sheet) and closes on the first click. Reverse if: Yehor's feedback says the cheat sheet is not enough.
 
 ## D18 Visible hands are rendered from joints, not skinned
 25 spheres and capsule bones from the joint poses: no asset to ship, correct per-frame, and writes depth so panels and hands occlude each other. Real-world occlusion of panels by your actual hands in passthrough needs the depth API, which Quest Browser does not give WebXR sessions; stated limit.
 
-## D19 Layouts are saved by slot, not by room
-WebXR exposes no stable room or anchor identity to a web page. A named slot (default, desk, couch) restored on start, plus recenter, covers the use without anchors. Reverse if: Quest Browser ships persistent anchors.
+## D19 One saved layout, not per room
+WebXR exposes no stable room or anchor identity to a web page, so a single saved layout restored on start plus recenter covers the use. Reverse if: Quest Browser ships persistent anchors.
 
 ## D20 Wi-Fi mode is wireless adb, not a certificate
 `adb reverse` works over wireless adb, so `localhost` on the headset reaches the Mac over Wi-Fi and stays a secure context: no certificate, no warning, loopback bind unchanged. A public certificate for a LAN name needs DNS control and a private key on the Mac; that remains `--lan --tls-p12` for anyone who has one. The headset is pinned to 5 GHz, which wireless adb uses like any other traffic.
@@ -75,3 +75,12 @@ macOS keys Screen Recording and Accessibility grants to the code requirement. An
 
 ## D22 Logs never contain the token or typed text
 Input logging is at debug level and records message type, key code class and text length only. The pairing token is never logged; the `open` command passes it to adb without printing it.
+
+## D23 Windows are streams 128 and up; focus follows the touch (2026-11-27)
+The video header already carries a one-byte stream id, so window streams reuse it: displays 0..127, windows 128..255, no new header. A click on a window panel activates its app before the click, which is what "focus follows the panel you touch" needs. Window input uses coordinates normalized to the window's current bounds.
+
+## D24 Spotlight results are opened by id, never by path
+`open` takes the id of a result the agent itself returned for this session, so a client cannot make the agent open an arbitrary path. The query goes to `mdfind` without a shell.
+
+## D25 Virtual displays are only ever the agent's own
+`remove` accepts only ids the agent created, and all of them go when the last client leaves, so a crashed headset cannot leave extra screens or a dark physical display (dimming restores on leave and on exit).

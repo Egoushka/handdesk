@@ -18,7 +18,7 @@ final class H264Encoder {
         let status = VTCompressionSessionCreate(allocator: nil, width: Int32(width), height: Int32(height), codecType: kCMVideoCodecType_H264,
                                                 encoderSpecification: nil, imageBufferAttributes: nil, compressedDataAllocator: nil,
                                                 outputCallback: nil, refcon: nil, compressionSessionOut: &s)
-        guard status == noErr, let session = s else { return nil }
+        guard status == noErr, let session = s else { log.error("error", ["where": "encoder_create", "status": Int(status)]); return nil }
         self.session = session
         func set(_ key: CFString, _ value: CFTypeRef) { VTSessionSetProperty(session, key: key, value: value) }
         set(kVTCompressionPropertyKey_RealTime, kCFBooleanTrue)
@@ -46,7 +46,11 @@ final class H264Encoder {
         let props: CFDictionary? = key ? [kVTEncodeFrameOptionKey_ForceKeyFrame: kCFBooleanTrue!] as CFDictionary : nil
         VTCompressionSessionEncodeFrame(session, imageBuffer: buffer, presentationTimeStamp: pts, duration: .invalid,
                                         frameProperties: props, infoFlagsOut: nil) { [weak self] status, _, sample in
-            guard status == noErr, let sample = sample, let self = self else { return }
+            guard let self = self else { return }
+            guard status == noErr, let sample = sample else {
+                if status != noErr { log.error("error", ["where": "encode", "status": Int(status)], throttleKey: "encode") }
+                return
+            }
             self.deliver(sample)
         }
     }
@@ -56,7 +60,7 @@ final class H264Encoder {
         var length = 0
         var ptr: UnsafeMutablePointer<Int8>?
         guard CMBlockBufferGetDataPointer(block, atOffset: 0, lengthAtOffsetOut: nil, totalLengthOut: &length, dataPointerOut: &ptr) == kCMBlockBufferNoErr,
-              let base = ptr else { return }
+              let base = ptr else { log.error("error", ["where": "encoder_buffer"], throttleKey: "encoder_buffer"); return }
         let avcc = Data(bytes: base, count: length)
         var isKey = true
         if let atts = CMSampleBufferGetSampleAttachmentsArray(sample, createIfNecessary: false) as? [[CFString: Any]], let first = atts.first {
@@ -74,7 +78,7 @@ final class H264Encoder {
                 }
             }
         }
-        guard let annexB = AnnexB.convert(avcc: avcc, parameterSets: sets) else { return }
+        guard let annexB = AnnexB.convert(avcc: avcc, parameterSets: sets) else { log.error("error", ["where": "annexb", "message": "truncated NAL stream"], throttleKey: "annexb"); return }
         let micros = UInt64(max(0, CMTimeGetSeconds(CMSampleBufferGetPresentationTimeStamp(sample)) * 1_000_000))
         onFrame(annexB, isKey, micros)
     }

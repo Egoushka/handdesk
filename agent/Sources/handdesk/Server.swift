@@ -53,7 +53,7 @@ final class Server {
         }
         l.newConnectionHandler = { [weak self] c in self?.accept(c) }
         l.stateUpdateHandler = { state in
-            if case let .failed(e) = state { FileHandle.standardError.write(Data("listener failed: \(e)\n".utf8)); exit(1) }
+            if case let .failed(e) = state { log.error("error", ["where": "listener", "message": e.localizedDescription]); exit(1) }
         }
         l.start(queue: queue)
         listener = l
@@ -126,6 +126,7 @@ final class Server {
                     queue.async {
                         self.starting.remove(i)
                         let hint = CGPreflightScreenCaptureAccess() ? "" : " (grant Screen Recording to the app that runs handdesk)"
+                        log.error("error", ["where": "capture", "display": i, "message": error.localizedDescription, "screenRecording": CGPreflightScreenCaptureAccess()])
                         for s in self.sessions.values where s.subscribed.contains(i) { s.sendText(errorMessage("capture failed: \(error.localizedDescription)\(hint)")) }
                     }
                 }
@@ -149,27 +150,32 @@ final class Session {
     private var pendingBytes = 0
     private var closed = false
     private var deadline: DispatchWorkItem?
+    private var openedAt: Date?
+    private var remote = ""
+    private let pageLogLimit = RateLimiter(limit: 20)
 
     init(connection: NWConnection, server: Server) { conn = connection; self.server = server }
 
     func start() {
         conn.stateUpdateHandler = { [weak self] st in
             switch st {
-            case .failed, .cancelled: self?.close()
+            case let .failed(e): self?.close("connection failed: \(e.localizedDescription)")
+            case .cancelled: self?.close("connection cancelled")
             default: break
             }
         }
         conn.start(queue: server.queue)
         // a connection that has not finished the WebSocket upgrade within 10 s is dropped (slow clients, idle sockets)
-        let d = DispatchWorkItem { [weak self] in if self?.upgraded == false { self?.close() } }
+        let d = DispatchWorkItem { [weak self] in if self?.upgraded == false { self?.close("no upgrade within 10 s") } }
         deadline = d
         server.queue.asyncAfter(deadline: .now() + 10, execute: d)
         receive()
     }
 
-    private func close() {
+    private func close(_ reason: String = "closed") {
         guard !closed else { return }
         closed = true
+        if let t = openedAt { log.info("session_close", ["reason": reason, "remote": remote, "seconds": Int(Date().timeIntervalSince(t))]) }
         deadline?.cancel()
         mapper?.releaseAll() // never leave a mouse button or modifier held after the session ends
         conn.cancel()
@@ -180,7 +186,7 @@ final class Session {
         conn.receive(minimumIncompleteLength: 1, maximumLength: 64 * 1024) { [weak self] data, _, done, err in
             guard let self = self else { return }
             if let d = data, !d.isEmpty { self.buffer.append(d); self.process() }
-            if done || err != nil { self.close() } else { self.receive() }
+            if let e = err { self.close("receive error: \(e.localizedDescription)") } else if done { self.close("peer closed") } else { self.receive() }
         }
     }
 
@@ -191,10 +197,13 @@ final class Session {
     private func processHTTP() {
         switch HTTP.parse(buffer) {
         case .incomplete: return
-        case .malformed: send(HTTP.response(status: 400, reason: "Bad Request"), thenClose: true)
+        case .malformed:
+            log.debug("http", ["status": 400])
+            send(HTTP.response(status: 400, reason: "Bad Request"), thenClose: true)
         case let .request(req, consumed):
             buffer.removeFirst(consumed)
             guard Auth.hostAllowed(host: req.headers["host"], extra: server.hostName) else {
+                log.warn("rejected", ["why": "host", "host": LogScrub.clean(req.headers["host"] ?? "", max: 80)])
                 return send(HTTP.response(status: 403, reason: "Forbidden"), thenClose: true)
             }
             if req.path == "/ws" { upgrade(req) } else { serveStatic(req) }
@@ -203,15 +212,19 @@ final class Session {
 
     private func upgrade(_ req: HTTPRequest) {
         guard Auth.authorizeWebSocket(req, token: server.token) else {
+            log.warn("rejected", ["why": "auth", "path": LogScrub.secrets(req.path, token: server.token)])
             return send(HTTP.response(status: 403, reason: "Forbidden"), thenClose: true)
         }
         guard let resp = WebSocket.handshakeResponse(for: req) else {
             return send(HTTP.response(status: 400, reason: "Bad Request"), thenClose: true)
         }
         upgraded = true
+        openedAt = Date()
+        remote = LogScrub.clean("\(conn.endpoint)", max: 80)
         mapper = server.makeMapper()
         send(resp)
-        sendText(helloMessage(displays: server.displayList))
+        sendText(helloMessage(displays: server.displayList, permissions: currentPermissions()))
+        log.info("session_open", ["remote": remote, "displays": server.displayList.count])
         subscribed = [0]
         server.subscriptionsChanged(newlySubscribed: [0])
         processFrames()
@@ -229,13 +242,13 @@ final class Session {
         while true {
             switch WebSocket.parse(buffer) {
             case .incomplete: return
-            case .invalid: return close()
+            case .invalid: return close("invalid frame")
             case let .frame(f, consumed):
                 buffer.removeFirst(consumed)
                 switch f.opcode {
                 case .text: handleText(f.payload)
                 case .ping: send(WebSocket.encode(opcode: .pong, payload: f.payload))
-                case .close: send(WebSocket.encode(opcode: .close, payload: Data()), thenClose: true); return
+                case .close: close("client closed"); send(WebSocket.encode(opcode: .close, payload: Data()), thenClose: true); return
                 default: break
                 }
             }
@@ -243,10 +256,16 @@ final class Session {
     }
 
     private func handleText(_ data: Data) {
-        guard let msg = ClientMessage.decode(data) else { return }
-        if case let .subscribe(list) = msg {
+        guard let msg = ClientMessage.decode(data) else { log.debug("input", ["type": "invalid", "bytes": data.count]); return }
+        log.debug("input", msg.logFields)
+        if case let .ping(t) = msg {
+            sendText(pongMessage(t: t))
+        } else if case let .log(level, text) = msg {
+            if pageLogLimit.allow() { log.log(level, "page", ["message": LogScrub.clean(text, token: server.token)]) }
+        } else if case let .subscribe(list) = msg {
             let valid = Set(list.filter { server.displayList.indices.contains($0) })
             subscribed = valid
+            log.info("subscribe", ["displays": Array(valid).sorted()])
             // every subscribe asks for a fresh keyframe, so a page that lost its decoder recovers on a static screen
             waitingForKey.formUnion(valid)
             server.subscriptionsChanged(newlySubscribed: Array(valid))

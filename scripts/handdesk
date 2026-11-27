@@ -9,6 +9,7 @@ if [ ! -f "$root/web/dist/index.html" ]; then
   (cd "$root/web" && npm ci && npm run build)
 fi
 (cd "$root/agent" && swift build -c release >/dev/null)
+"$root/scripts/sign-mac.sh" "$root/agent/.build/release/handdesk" >/dev/null || true # keeps the permission grants across rebuilds
 bin="$root/agent/.build/release/handdesk"
 if [ "${1:-}" = "start" ]; then
   shift
