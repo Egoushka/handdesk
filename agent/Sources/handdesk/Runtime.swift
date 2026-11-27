@@ -31,6 +31,17 @@ enum Shell {
     }
 }
 
+let wifiMemoryURL = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Application Support/handdesk/wifi")
+func rememberedWifi() -> [String] {
+    ((try? String(contentsOf: wifiMemoryURL, encoding: .utf8)) ?? "").split(whereSeparator: \.isNewline).map { String($0) }
+}
+func rememberWifi(_ addr: String) {
+    var all = rememberedWifi()
+    if !all.contains(addr) { all.append(addr) }
+    try? FileManager.default.createDirectory(at: wifiMemoryURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+    try? all.joined(separator: "\n").write(to: wifiMemoryURL, atomically: true, encoding: .utf8)
+}
+
 func adbPath() -> String? { Adb.searchPaths.first { FileManager.default.isExecutableFile(atPath: $0) } }
 
 func adbDevices(_ adb: String) -> [String] { Adb.parseDevices(Shell.run(adb, Adb.devicesArgs).output) }
@@ -59,7 +70,13 @@ final class AdbSupervisor {
             return
         }
         warnedMissing = false
-        let serials = adbDevices(adb)
+        var serials = adbDevices(adb)
+        let missing = Adb.missingConnects(remembered: rememberedWifi(), connected: serials)
+        for addr in missing {
+            let c = Shell.run(adb, ["connect", addr], timeout: 5)
+            if c.output.contains("connected") && !c.output.contains("failed") { log.info("adb", ["action": "wifi_reconnected", "serial": addr]) }
+        }
+        if !missing.isEmpty { serials = adbDevices(adb) }
         for gone in known.keys where !serials.contains(gone) {
             known[gone] = nil
             log.info("adb", ["action": "device_removed", "serial": gone])
@@ -112,6 +129,7 @@ func commandWifi() -> Never {
     guard let ip = Adb.parseWifiAddress(addr.output) else { fail("the headset has no Wi-Fi address (is it on Wi-Fi?)") }
     let c = Shell.run(adb, Adb.connectArgs(address: ip))
     guard c.status == 0, c.output.contains("connected") else { fail("adb connect failed: \(LogScrub.clean(c.output, max: 200))") }
+    rememberWifi("\(ip):5555")
     log.info("adb", ["action": "wifi_connected", "serial": "\(ip):5555"])
     print("\(ip):5555")
     exit(0)
@@ -124,6 +142,9 @@ func commandOpen(port: UInt16) -> Never {
     let url = Adb.pageURL(port: port, token: token)
     var opened = 0
     for s in adbDevices(adb) {
+        // the page needs the reverse: set it now and fail loudly if it cannot be
+        if !Adb.hasReverse(Shell.run(adb, Adb.reverseListArgs(serial: s)).output, port: port),
+           Shell.run(adb, Adb.reverseArgs(serial: s, port: port)).status != 0 { log.error("adb", ["action": "reverse_failed", "serial": s]); fail("adb reverse failed on \(s); the page would not load") }
         // adb echoes the intent, which contains the URL: the output is never printed or logged
         if Shell.run(adb, Adb.openArgs(serial: s, url: url)).status == 0 { opened += 1; log.info("adb", ["action": "opened_page", "serial": s]) }
         else { log.error("adb", ["action": "open_failed", "serial": s]) }

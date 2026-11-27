@@ -135,4 +135,12 @@ final class V2Tests {
         XCTAssertNil(Adb.parseWifiAddress("Device \"wlan0\" does not exist."))
         XCTAssertNil(Adb.parseWifiAddress("inet 999.1.1.1/24"))
     }
+
+    func testReconnectAndCloseReasons() {
+        XCTAssertEqual(Adb.missingConnects(remembered: ["192.168.88.42:5555", "garbage"], connected: ["2G0YC5ZH6Q03N9"]), ["192.168.88.42:5555"])
+        XCTAssertEqual(Adb.missingConnects(remembered: ["192.168.88.42:5555"], connected: ["192.168.88.42:5555"]), [])
+        XCTAssertEqual(Adb.describeClose(Data([0x03, 0xE9, 0x67, 0x6F])), "client closed (code 1001: go)")
+        XCTAssertEqual(Adb.describeClose(Data([0x03, 0xE8])), "client closed (code 1000)")
+        XCTAssertEqual(Adb.describeClose(Data()), "client closed (no code)")
+    }
 }

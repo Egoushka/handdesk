@@ -57,6 +57,7 @@ run(HardeningTests.init, [
 ])
 run(V2Tests.init, [
     ("testLoggerWritesJsonLinesAndHonoursLevel", V2Tests.testLoggerWritesJsonLinesAndHonoursLevel),
+    ("testReconnectAndCloseReasons", V2Tests.testReconnectAndCloseReasons),
     ("testFieldsCannotOverrideReservedKeys", V2Tests.testFieldsCannotOverrideReservedKeys),
     ("testThrottledErrorsLogOncePerWindow", V2Tests.testThrottledErrorsLogOncePerWindow),
     ("testFileSinkRotatesAtMaxBytesKeepingOneOldFile", V2Tests.testFileSinkRotatesAtMaxBytesKeepingOneOldFile),

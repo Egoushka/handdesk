@@ -47,6 +47,19 @@ public enum Adb {
 
     public static func pageURL(port: UInt16, token: String) -> String { "http://localhost:\(port)/?t=\(token)" }
 
+    /// Remembered Wi-Fi addresses ("ip:port") that adb no longer lists; the supervisor reconnects them.
+    public static func missingConnects(remembered: [String], connected: [String]) -> [String] {
+        remembered.filter { !connected.contains($0) && isWifiSerial($0) }
+    }
+
+    /// Close frame payload: 2-byte big-endian status code, then an optional UTF-8 reason. A short or empty payload is code 1005 (none).
+    public static func describeClose(_ payload: Data) -> String {
+        guard payload.count >= 2 else { return "client closed (no code)" }
+        let code = Int(payload[payload.startIndex]) << 8 | Int(payload[payload.startIndex + 1])
+        let reason = String(decoding: payload.dropFirst(2).prefix(100), as: UTF8.self).filter { !$0.isNewline && $0.asciiValue.map { $0 >= 32 } ?? true }
+        return reason.isEmpty ? "client closed (code \(code))" : "client closed (code \(code): \(reason))"
+    }
+
     /// Serials that are Wi-Fi (`ip:port`) rather than USB.
     public static func isWifiSerial(_ s: String) -> Bool { s.contains(":") && s.split(separator: ".").count == 4 }
 }
