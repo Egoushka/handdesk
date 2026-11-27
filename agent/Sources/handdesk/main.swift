@@ -52,15 +52,20 @@ func parseStart(_ args: [String]) -> ServerConfig {
         case "--bitrate": guard let b = Int(value("--bitrate")), b > 0 else { fail("bad --bitrate") }; c.bitrate = b
         case "--max-width": guard let w = Int(value("--max-width")), w >= 320 else { fail("bad --max-width") }; c.maxWidth = w
         case "--no-adb": noAdb = true
+        case "--no-lan": noLan = true
         case "--log-level": guard let l = LogLevel(name: value("--log-level")), l <= .info else { fail("--log-level info|debug") }; logLevel = l
         default: fail("unknown option \(args[i])")
         }
         i += 1
     }
+    // a certificate issued by `handdesk cert issue` switches the LAN https listener on by itself
+    if !c.lan && !noLan, let a = CertCommand.active() { c.lan = true; c.p12Path = a.p12; c.host = a.host }
+    if c.lan { c.lanAddress = CertCommand.lanIP() }
     if c.lan && c.p12Path == nil { fail("--lan needs --tls-p12 (WebXR needs a secure context; see docs/decisions.md D1)") }
     return c
 }
 var noAdb = false
+var noLan = false
 // retained for the life of the process: a timer owned by a dropped object never fires (issue #5)
 var adbSupervisor: AdbSupervisor?
 var permissionWatcher: PermissionWatcher?
@@ -84,10 +89,20 @@ func command(_ cmd: String) -> Never {
         catch { fail("cannot write \(plist.path): \(error.localizedDescription)") }
         launchctl(["bootout", "\(domain)/\(label)"])
         launchctl(["bootstrap", domain, plist.path])
+        if CertCommand.loadConfig() != nil {
+            let renew = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Cert.renewLabel).plist")
+            let renewLog = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/Logs/handdesk-cert.log").path
+            try? Cert.renewalPlist(executable: exe, logPath: renewLog).write(to: renew, atomically: true, encoding: .utf8)
+            launchctl(["bootout", "\(domain)/\(Cert.renewLabel)"])
+            launchctl(["bootstrap", domain, renew.path])
+            print("installed the daily certificate check (\(renew.path))")
+        }
         print("installed \(plist.path); structured log in \(logURL.path), launchd output in \(log)")
     case "uninstall":
         launchctl(["bootout", "\(domain)/\(label)"])
         try? FileManager.default.removeItem(at: plist)
+        launchctl(["bootout", "\(domain)/\(Cert.renewLabel)"])
+        try? FileManager.default.removeItem(at: FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Library/LaunchAgents/\(Cert.renewLabel).plist"))
         print("removed \(plist.path)")
     default: fail("launchagent install [start options] | uninstall")
     }
@@ -108,11 +123,11 @@ case "start":
     log.info("start", ["version": agentVersion, "port": Int(config.port), "lan": config.lan, "displays": displays.count, "logLevel": logLevel.name,
                        "screenRecording": perms.screenRecording, "accessibility": perms.accessibility, "web": config.webRoot])
     if !FileManager.default.fileExists(atPath: config.webRoot + "/index.html") { log.warn("error", ["where": "web", "message": "no page at \(config.webRoot)"]) }
-    if !noAdb && !config.lan { adbSupervisor = AdbSupervisor(port: config.port); adbSupervisor?.start() }
+    if !noAdb { adbSupervisor = AdbSupervisor(port: config.port); adbSupervisor?.start() }
     permissionWatcher = PermissionWatcher()
     permissionWatcher?.start()
     // the pairing URL is shown only to a terminal; under launchd it would end up in a log file (use `handdesk open`)
-    if isatty(1) != 0 { print("Open on the Quest: http://localhost:\(config.port)/?t=\(config.token)") }
+    if isatty(1) != 0 { print("Open on the Quest: \(config.lan ? Cert.pageURL(host: config.host ?? "", port: config.port, token: config.token) : "http://localhost:\(config.port)/?t=\(config.token)")") }
     else { print("Pairing URL not printed (not a terminal): run `handdesk open` to open it on the headset") }
     for sig in [SIGINT, SIGTERM] {
         signal(sig, SIG_IGN)
@@ -131,6 +146,8 @@ case "token":
     do { print(try Token.loadOrCreate(at: tokenURL)) } catch { fail("cannot read the pairing token: \(error.localizedDescription)") }
 case "wifi":
     commandWifi()
+case "cert":
+    CertCommand.run(Array(args.dropFirst()))
 case "open":
     var port: UInt16 = 8787
     if let i = args.firstIndex(of: "--port"), i + 1 < args.count, let p = UInt16(args[i + 1]) { port = p }
@@ -142,8 +159,9 @@ case "launchagent":
 default:
     print("""
     handdesk start [--port 8787] [--lan --tls-p12 FILE --host NAME] [--web DIR] [--magnify keys|gesture] [--invert-scroll]
-                   [--fps 60] [--bitrate 25000000] [--max-width 2560] [--no-adb] [--log-level info|debug]
+                   [--fps 60] [--bitrate 25000000] [--max-width 2560] [--no-adb] [--no-lan] [--log-level info|debug]
     handdesk launchagent install [start options] | uninstall
+    handdesk cert issue --email E | renew | status   (trusted https URL for Wi-Fi, see docs/how-to/wifi-https.md)
     handdesk doctor
     handdesk token
     handdesk wifi                 (headset on USB once: switch adb to Wi-Fi)

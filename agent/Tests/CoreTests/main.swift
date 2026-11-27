@@ -94,5 +94,16 @@ run(MacTests.init, [
     ("testSpotlightRankAppsFirstDedupedAndCapped", MacTests.testSpotlightRankAppsFirstDedupedAndCapped),
     ("testOutgoingMessages", MacTests.testOutgoingMessages),
 ])
+run(CertTests.init, [
+    ("testConfigRoundTripAndDefaults", CertTests.testConfigRoundTripAndDefaults),
+    ("testHostAndEmailValidation", CertTests.testHostAndEmailValidation),
+    ("testDotenvValue", CertTests.testDotenvValue),
+    ("testLegoEnvironmentCarriesNoToken", CertTests.testLegoEnvironmentCarriesNoToken),
+    ("testP12UsesAPasswordFileNeverTheValue", CertTests.testP12UsesAPasswordFileNeverTheValue),
+    ("testEnddateAndRenewalThreshold", CertTests.testEnddateAndRenewalThreshold),
+    ("testDnsRecordIsPrivateDnsOnlyAndActionsAreIdempotent", CertTests.testDnsRecordIsPrivateDnsOnlyAndActionsAreIdempotent),
+    ("testLanAddressPrefersEn0AndSkipsPublicAndVirtual", CertTests.testLanAddressPrefersEn0AndSkipsPublicAndVirtual),
+    ("testRenewalPlistRunsCertRenewDaily", CertTests.testRenewalPlistRunsCertRenewDaily),
+])
 print("\(testCount) tests, \(checkCount) checks, \(failureCount) failures")
 exit(failureCount == 0 ? 0 : 1)

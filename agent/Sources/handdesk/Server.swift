@@ -10,6 +10,8 @@ struct ServerConfig {
     /// the name clients use to reach the Mac in --lan mode (Host header allowlist)
     var host: String?
     var p12Path: String?
+    /// the Mac's LAN address the TLS listener binds to (not 0.0.0.0)
+    var lanAddress: String?
     var webRoot: String
     var token: String
     var magnifyMode: MagnifyMode = .keys
@@ -27,7 +29,7 @@ final class Server {
     private let config: ServerConfig
     private var displays: [DisplayInfo]
     private let poster: EventPoster
-    private var listener: NWListener?
+    private var listeners: [NWListener] = []
     private var sessions: [ObjectIdentifier: Session] = [:]
     /// keyed by wire stream id: display index 0...127, window stream 128...255
     private var streams: [Int: DisplayStream] = [:]
@@ -48,33 +50,34 @@ final class Server {
     func start() throws {
         activeServer = self
         CGDisplayRegisterReconfigurationCallback({ _, _, _ in activeServer?.queue.async { activeServer?.displayConfigurationChanged() } }, nil)
-        let params: NWParameters
-        if let p12 = config.p12Path {
+        let port = NWEndpoint.Port(rawValue: config.port)!
+        func listen(_ params: NWParameters, host: NWEndpoint.Host, label: String) throws {
+            params.requiredLocalEndpoint = .hostPort(host: host, port: port)
+            params.allowLocalEndpointReuse = true
+            let l = try NWListener(using: params)
+            l.newConnectionHandler = { [weak self] c in self?.accept(c) }
+            l.stateUpdateHandler = { state in
+                if case let .failed(e) = state { log.error("error", ["where": "listener", "which": label, "message": e.localizedDescription]); exit(1) }
+            }
+            l.start(queue: queue)
+            listeners.append(l)
+        }
+        // plain http on loopback only: the Quest reaches it through adb reverse (a secure context)
+        try listen(.tcp, host: .ipv4(.loopback), label: "loopback")
+        if config.lan, let p12 = config.p12Path {
+            // https on the Mac's LAN address only, with a publicly trusted certificate for config.host
             let tls = NWProtocolTLS.Options()
             sec_protocol_options_set_local_identity(tls.securityProtocolOptions, try Self.identity(p12Path: p12))
-            params = NWParameters(tls: tls)
-        } else {
-            params = .tcp
+            let addr = config.lanAddress.flatMap { IPv4Address($0) }
+            guard let addr else { throw NSError(domain: "handdesk", code: 4, userInfo: [NSLocalizedDescriptionKey: "no LAN address to bind to"]) }
+            try listen(NWParameters(tls: tls), host: .ipv4(addr), label: "lan")
         }
-        let port = NWEndpoint.Port(rawValue: config.port)!
-        let l: NWListener
-        if config.lan {
-            l = try NWListener(using: params, on: port)
-        } else {
-            params.requiredLocalEndpoint = .hostPort(host: .ipv4(.loopback), port: port) // reachable only from this Mac (and adb reverse)
-            l = try NWListener(using: params)
-        }
-        l.newConnectionHandler = { [weak self] c in self?.accept(c) }
-        l.stateUpdateHandler = { state in
-            if case let .failed(e) = state { log.error("error", ["where": "listener", "message": e.localizedDescription]); exit(1) }
-        }
-        l.start(queue: queue)
-        listener = l
     }
 
     static func identity(p12Path: String) throws -> sec_identity_t {
         let data = try Data(contentsOf: URL(fileURLWithPath: p12Path))
-        let pass = ProcessInfo.processInfo.environment["HANDDESK_P12_PASSWORD"] ?? ""
+        let passFile = (try? String(contentsOfFile: p12Path + ".pass", encoding: .utf8))?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pass = ProcessInfo.processInfo.environment["HANDDESK_P12_PASSWORD"] ?? passFile ?? ""
         var items: CFArray?
         guard SecPKCS12Import(data as CFData, [kSecImportExportPassphrase as String: pass] as CFDictionary, &items) == errSecSuccess,
               let first = (items as? [[String: Any]])?.first, let raw = first[kSecImportItemIdentity as String],
