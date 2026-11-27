@@ -68,6 +68,9 @@ final class CertTests {
         XCTAssertEqual(Cert.dnsAction(existing: [], ip: "192.168.88.244"), .create)
         XCTAssertEqual(Cert.dnsAction(existing: [(id: "r1", content: "192.168.88.244")], ip: "192.168.88.244"), .none)
         XCTAssertEqual(Cert.dnsAction(existing: [(id: "r1", content: "192.168.88.9")], ip: "192.168.88.244"), .update(id: "r1"))
+        XCTAssertTrue(Cert.resolves(digOutput: "192.168.88.244\n", to: "192.168.88.244"))
+        XCTAssertFalse(Cert.resolves(digOutput: "", to: "192.168.88.244"))
+        XCTAssertFalse(Cert.resolves(digOutput: "192.168.88.9\n", to: "192.168.88.244"))
     }
 
     func testLanAddressPrefersEn0AndSkipsPublicAndVirtual() {

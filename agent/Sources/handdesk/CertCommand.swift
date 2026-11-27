@@ -82,6 +82,29 @@ enum CertCommand {
         }
     }
 
+    /// Asks public resolvers (not the API) whether the name answers with the Mac's address.
+    static func resolvesPublicly(_ host: String, ip: String) -> Bool {
+        ["1.1.1.1", "8.8.8.8"].contains { server in
+            Cert.resolves(digOutput: Shell.run("/usr/bin/dig", ["+short", "+time=3", "+tries=1", host, "@\(server)"], timeout: 15).output, to: ip)
+        }
+    }
+
+    /// The API can list a record that no resolver returns. Then delete and re-create it, and fail loudly if it still does not resolve.
+    static func verifyRecord(_ c: Cert.Config, token: String, ip: String) {
+        if resolvesPublicly(c.host, ip: ip) { print("dns: \(c.host) resolves to \(ip)"); return }
+        print("dns: WARNING \(c.host) does not resolve to \(ip) in public DNS although the API lists it; re-creating the record")
+        log.warn("cert", ["action": "dns_not_resolving", "host": c.host, "ip": ip])
+        if let z = cf(token, "GET", "/zones?name=\(Cert.zoneName(host: c.host))"), let zid = ((z["result"] as? [[String: Any]])?.first)?["id"] as? String,
+           let l = cf(token, "GET", "/zones/\(zid)/dns_records?type=A&name=\(c.host)") {
+            for r in (l["result"] as? [[String: Any]]) ?? [] where (r["comment"] as? String)?.hasPrefix("handdesk:") == true {
+                if let id = r["id"] as? String { _ = cf(token, "DELETE", "/zones/\(zid)/dns_records/\(id)") }
+            }
+        }
+        ensureRecord(c, token: token, ip: ip)
+        for _ in 0..<6 { if resolvesPublicly(c.host, ip: ip) { print("dns: \(c.host) resolves to \(ip)"); return }; Thread.sleep(forTimeInterval: 10) }
+        fail("dns: \(c.host) still does not resolve to \(ip)")
+    }
+
     static func lanIP() -> String? {
         var ifs: [(name: String, ip: String)] = []
         var head: UnsafeMutablePointer<ifaddrs>?
@@ -139,6 +162,7 @@ enum CertCommand {
         print("certificate: \(d.map { "\($0) days left" } ?? "none")")
         print("p12: \(FileManager.default.fileExists(atPath: p12URL.path) ? "present" : "missing")")
         print("lan address: \(lanIP() ?? "unknown")")
+        if let ip = lanIP() { print("dns: \(resolvesPublicly(c.host, ip: ip) ? "resolves in public DNS" : "DOES NOT resolve in public DNS (run: handdesk cert renew)")") }
         if let d, Cert.needsRenewal(daysLeft: d) { print("renewal: due") }
         if CommandLine.arguments.contains("--dns") {
             let token = readToken(c)
@@ -180,7 +204,7 @@ enum CertCommand {
     static func renew() {
         guard let c = loadConfig() else { fail("cert: not set up") }
         let token = readToken(c)
-        if let ip = lanIP() { ensureRecord(c, token: token, ip: ip) }
+        if let ip = lanIP() { ensureRecord(c, token: token, ip: ip); verifyRecord(c, token: token, ip: ip) }
         var changed = false
         if let d = daysLeft(c), !Cert.needsRenewal(daysLeft: d), FileManager.default.fileExists(atPath: p12URL.path) {
             print("cert: \(d) days left, no renewal needed")
