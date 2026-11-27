@@ -1,4 +1,4 @@
-# handdesk v0.3.2 spec: a virtual hand and snips
+# handdesk v0.3.3 spec: a virtual hand and snips
 
 Feedback after v0.3.1: "hand is bad, I want it virtual", and "I want to interact visually with a screen and take parts of it".
 
