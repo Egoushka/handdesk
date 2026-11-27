@@ -117,6 +117,12 @@ public enum Cert {
         return first.content == ip ? .none : .update(id: first.id)
     }
 
+    /// Whether a real DNS query (`dig +short` output, one answer per line) returns the Mac's address. The Cloudflare API listing a
+    /// record is not proof the name resolves, so `cert renew` and `status` check the answers themselves.
+    public static func resolves(digOutput: String, to ip: String) -> Bool {
+        digOutput.split(whereSeparator: \.isNewline).contains { $0.trimmingCharacters(in: .whitespaces) == ip }
+    }
+
     // MARK: network interface choice
 
     /// The Mac's LAN address: prefer en0, then any other en* interface, private addresses only.
