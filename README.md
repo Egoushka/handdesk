@@ -46,11 +46,11 @@ I wanted a large desktop I can fly around in and work with my hands: click icons
 | Index, middle, ring out, swipe 10 cm | left/right: Ctrl-Left/Right (Spaces); up: Mission Control; down: App Expose |
 | Both hands pinching | move, turn and resize the panel |
 | Fingertip within 3 cm of a panel, then through it | touch: tap and drag, like a touchscreen |
-| Left palm up for 0.4 s | cheat sheet and menu (environment, recenter, save layout, keyboard, desk, launcher) |
+| Flip the left wrist (palm down, up, down) | open or hide the main menu (also the Menu button under the screen) |
 | Far pinch on a panel's yellow handle | scale (corners), curve (bottom), move (top bar) |
 
 - Virtual keyboard: ten fingers on the desk, English and Ukrainian (ЙЦУКЕН), sticky Cmd, Ctrl, Opt and Shift, a click sound and a key highlight on each press, a word-suggestion strip and an autocorrect that snaps an edge press to the likely key. All local, no cloud. Your Bluetooth keyboard keeps working.
-- Your hands are drawn from all 25 joints, with a ring that closes as you pinch, and a red notice when tracking is lost. The first time, a short overlay says how to start; the cheat sheet is always one palm-up away.
+- Your hands are drawn from all 25 joints, with a ring that closes as you pinch, and a red notice when tracking is lost. The first time, a five-step guide says how to start; it and a one-page gesture sheet are under Menu, Help.
 - Environments: passthrough, dim passthrough, night sky, grid. The layout (panel positions, sizes, curve, desk) is saved from the menu and restored on start.
 - The Mac as a machine: the launcher panel lists running apps and windows and searches Spotlight as you type on the virtual keyboard. A window becomes its own panel, and touching it focuses that window. The launcher also adds or removes virtual displays and can dim the Mac's own screen.
 - The agent keeps a JSON log at `~/Library/Logs/handdesk.log` (connects, disconnects, errors; `--log-level debug` adds input types, never typed text or the token). `handdesk logs` tails it.
@@ -77,7 +77,7 @@ Without `adb`, `--lan --tls-p12 FILE` serves HTTPS on the local network with a c
 
 ## Modes
 
-Pick a mode from the left palm-up menu, or flip your left wrist (palm down, up, down) to go to the next one. The box by your left hand shows the mode, the last gesture it recognised, your pinch strength and the tracking state; the menu can also show a log of the last 10 gestures.
+Open the main menu with a left wrist flip (palm down, up, down) or the Menu button under the screen, and tap a mode tile. The Menu button shows the current mode and the link state; Help can turn on a box by your left hand with the last gesture, pinch strength, tracking state and a log of the last 10 gestures.
 
 | Mode | What your hands do |
 |---|---|

@@ -5,25 +5,28 @@ import { calibrateFromFlatHands, planeFromYaw, toPlane, type TypingPlane } from 
 import { POKE, PressDetector, SURFACE, type FingerTip } from "../keyboard/press";
 import { TypingSession } from "../keyboard/session";
 import { StripSwipe } from "../keyboard/strip";
-import { editQuery, launcherRows, MacState, rowIndexAt, type Row, type ServerMessage } from "../mac/state";
+import { editQuery, launcherRows, MacState, rowIndexAt, type ServerMessage } from "../mac/state";
 import { HintTracker } from "../onboarding/hints";
-import { PalmMenuDetector, introDone, markIntroDone } from "../onboarding/palm";
-import { INTRO, Stats, statusLine, type Permissions } from "../onboarding/status";
+import { introDone, markIntroDone } from "../onboarding/palm";
+import { Stats, permissionProblems, type Permissions } from "../onboarding/status";
+import { Surface } from "../ui/surface";
+import { DECK_H, DECK_M, DECK_W, deckLayout, pageCount, type DeckState } from "../ui/deck";
+import { CHIP_H, CHIP_M, CHIP_W, GUIDE, GUIDE_H, GUIDE_M, GUIDE_W, SHEET_H, SHEET_M, SHEET_W, chipLayout, guideLayout, modeIconOf, sheetLayout } from "../ui/guide";
 import { TrackingState } from "../hands/rig";
 import { applyGrab, pickPanel, type Panel } from "../panel";
 import { gestureToMessages, keyActionToMessages, newMapperState, type ClientMessage } from "../protocol";
 import { DirectTouch } from "../space/touch";
 import { handlesOf, type Handle, handlesVisible, distanceToPanel } from "../space/handles";
 import { windowPanel } from "../space/windows";
-import { ExtraGestures, EXTRA_CHEAT_SHEET, type ExtraEvent } from "../gesture/extra";
+import { ExtraGestures, type ExtraEvent } from "../gesture/extra";
 import { ArrangeDrag } from "../input/arrange";
 import { PointerRouter, type Pick, type PointerAction, type SelectEvent } from "../input/pointer";
 import { Trackpad } from "../input/trackpad";
 import { GestureLog, hudLines, strongestPinch, trackingText } from "../feedback/feedback";
-import { MODES, WristFlip, loadMode, modeInfo, nextMode, policyOf, saveMode, type Mode } from "../modes/modes";
+import { WristFlip, loadMode, modeInfo, policyOf, saveMode, type Mode } from "../modes/modes";
 import { DISTANCE_STEP, SPAWN_DISTANCE, SPAWN_WIDTH, headDistance, panelInFront, withDistance } from "../space/surface";
 import { extraToMessages } from "../gesture/extraMessages";
-import { effectiveHandMode, HAND_MODES, loadHandMode, nextHandMode, saveHandMode, type HandMode } from "../hands/mode";
+import { effectiveHandMode, loadHandMode, saveHandMode, type HandMode } from "../hands/mode";
 import { SkinnedHands } from "../hands/skin";
 import { sessionInit } from "./session";
 import { ENVIRONMENTS, isVr, loadLayout, nextEnvironment, recenterPanels, saveLayout, type EnvId } from "../space/layout";
@@ -103,13 +106,19 @@ let placed = false;
 let lastHead: HeadFrame = { position: { x: 0, y: 1.6, z: 0 }, yaw: 0 };
 
 // ---- ui panels ----
-const intro = new UiPanel("intro", 0.9, 0.42, 5);
-const menu = new UiPanel("menu", 0.62, 1.1, 21);
-const snipList = new UiPanel("snips", 0.8, 0.9, 14);
-const gestures = new UiPanel("gestures", 0.9, 0.5, 10);
+// the main menu, the guide, the cheat sheet and the Menu button are Surfaces (zones); the launcher is the old text list, only for typing a Spotlight search
+const deck = new Surface("deck", DECK_M, DECK_W, DECK_H);
+const guide = new Surface("guide", GUIDE_M, GUIDE_W, GUIDE_H);
+const sheet = new Surface("sheet", SHEET_M, SHEET_W, SHEET_H);
+const chip = new Surface("menu", CHIP_M, CHIP_W, CHIP_H, true);
 const launcher = new UiPanel("launcher", 0.8, 1.15, 26);
-const uiPanels = [intro, menu, launcher, gestures, snipList];
+type UiLike = UiPanel | Surface;
+const uiPanels: UiLike[] = [chip, deck, launcher, guide, sheet];
 for (const u of uiPanels) scene.add(u.mesh);
+const deckState: DeckState = { tab: "mode", mode: "point", hand: "virtual", distance: 1.4, env: "", status: "", windows: [], page: 0, snips: [], snipMode: false, calibrating: false, deskSet: false, log: false, dimmed: false };
+let guideStep = 0;
+let deckMoved = false;
+let deckMove: { hand: Hand; t: number; off: Vec3 } | { hand: Hand; t?: undefined } | undefined;
 const statusBar = new Billboard(1.1, 0.07, 30);
 const hintBar = new Billboard(0.5, 0.07, 32);
 const lostBar = new Billboard(0.9, 0.12, 42, "rgba(127,29,29,0.9)");
@@ -117,7 +126,7 @@ scene.add(statusBar.mesh, hintBar.mesh, lostBar.mesh);
 
 let launcherQuery = "";
 let launcherFocused = false;
-let uiHover: { id: string; row: number; t: number } | undefined;
+let uiHover: { id: string; x: number; y: number; t: number } | undefined;
 
 const conn = new Connection({
   onStatus: (t) => { linkText = t; linkEl.textContent = t; },
@@ -194,8 +203,16 @@ function removeWindowPanel(id: number): void {
 
 /** Recenter the display row. Window panels keep their own place: they spawn near the head and are moved by hand. */
 function arrange(head: HeadFrame): void {
+  placeChip(head);
   const views = displayViews;
   recenterPanels(views.map((v) => v.panel), head).forEach((p, i) => { views[i]!.panel = p; views[i]!.sync(); });
+}
+
+/** The Menu button sits low in front of the head, left of centre, where a hand can reach it; recenter brings it back. */
+function placeChip(head: HeadFrame): void {
+  placeUi(chip, head, -0.25, 1.0);
+  chip.panel.center.y = head.position.y - 0.5;
+  chip.sync();
 }
 
 // ---- modes and feedback ----
@@ -268,24 +285,8 @@ function applyHandMode(): void {
 }
 
 // ---- menu ----
-const menuRows = (): Row[] => [
-  { text: "Mode (or flip your left wrist)", header: true },
-  ...MODES.map((m) => ({ text: `${m.id === mode ? "\u25cf" : "\u25cb"} ${m.label}`, sub: m.hint, action: { kind: "local" as const, id: `mode:${m.id}` as const } })),
-  { text: `Environment: ${ENVIRONMENTS.find((e) => e.id === env)!.label}`, action: { kind: "local", id: "env" } },
-  { text: "Recenter", action: { kind: "local", id: "recenter" } },
-  { text: "Save layout", action: { kind: "local", id: "save" } },
-  { text: calibrating ? "Hands flat on the desk..." : pokeMode ? "Find desk (hands flat)" : "Desk set: find again", action: { kind: "local", id: "cal" } },
-  { text: "Launcher", action: { kind: "local", id: "launcher" } },
-  { text: snipMode ? "Snip: pinch-drag a rectangle..." : "Snip a region", sub: "or thumb and ring, drag", action: { kind: "local", id: "snipDraw" } },
-  { text: `Snips (${snips.length})`, action: { kind: "local", id: "snipList" } },
-  { text: `Hands: ${HAND_MODES.find((m) => m.id === handMode)!.label}`, action: { kind: "local", id: "hands" } },
-  { text: "More gestures", action: { kind: "local", id: "gestures" } },
-  { text: "Panels closer", action: { kind: "local", id: "closer" } },
-  { text: "Panels farther", action: { kind: "local", id: "farther" } },
-  { text: showLog ? "Gesture log: on" : "Gesture log: off", action: { kind: "local", id: "log" } },
-];
 function localAction(id: string, time: number): void {
-  if (id.startsWith("mode:")) setMode(id.slice(5) as Mode, time);
+  if (id.startsWith("hand:")) { handSaved = id.slice(5) as HandMode; saveHandMode(localStorage, handSaved); applyHandMode(); }
   else if (id === "closer" || id === "farther") {
     for (const v of sourceViews()) { v.panel = withDistance(v.panel, lastHead.position, headDistance(v.panel, lastHead.position) + (id === "closer" ? -DISTANCE_STEP : DISTANCE_STEP)); v.sync(); }
   } else if (id === "log") showLog = !showLog;
@@ -302,19 +303,16 @@ function localAction(id: string, time: number): void {
   }
   else if (id === "cal") calibrating = { until: time + 2500, planes: [] };
   else if (id === "launcher") { launcher.show(!launcher.visible); launcherFocused = launcher.visible; if (launcher.visible) { conn.send({ type: "windows" }); conn.send({ type: "apps" }); placeUi(launcher, lastHead, -0.55, 1.1); } }
-  else if (id === "hands") { handSaved = nextHandMode(handMode); saveHandMode(localStorage, handSaved); applyHandMode(); }
-  else if (id === "gestures") { gestures.setRows([{ text: "More gestures (tap to close)", header: true }, ...EXTRA_CHEAT_SHEET.map((t) => ({ text: t, header: true }))]); gestures.show(!gestures.visible); placeUi(gestures, lastHead, 0.5, 1.1); }
-  else if (id === "snipDraw") { snipMode = !snipMode; menu.show(false); log("info", snipMode ? "snip mode on" : "snip mode off"); }
-  else if (id === "snipList") { snipList.show(!snipList.visible); placeUi(snipList, lastHead, 0.55, 1.0); }
+  else if (id === "snipDraw") { snipMode = !snipMode; if (snipMode) deck.show(false); log("info", snipMode ? "snip mode on" : "snip mode off"); }
   else if (id === "snipsClear") { for (const sn of [...snips]) dropSnip(sn); pendingSnips.length = 0; persistSnips(true); }
   else if (id.startsWith("snipPin:")) { const sn = snips.find((x) => x.id === Number(id.slice(8))); if (sn) sn.setPinned(!sn.pinned); persistSnips(true); }
   else if (id.startsWith("snipClose:")) { const sn = snips.find((x) => x.id === Number(id.slice(10))); if (sn) dropSnip(sn); persistSnips(true); }
   else if (id === "addDisplay") conn.send({ type: "virtualDisplay", action: "add", width: 2560, height: 1440, name: "handdesk" });
-  else if (id === "dimOn") conn.send({ type: "dimPhysical", on: true });
-  else if (id === "dimOff") conn.send({ type: "dimPhysical", on: false });
+  else if (id === "dimOn") { deckState.dimmed = true; conn.send({ type: "dimPhysical", on: true }); }
+  else if (id === "dimOff") { deckState.dimmed = false; conn.send({ type: "dimPhysical", on: false }); }
 }
 
-function placeUi(u: UiPanel, head: HeadFrame, offset: number, distance: number): void {
+function placeUi(u: UiLike, head: HeadFrame, offset: number, distance: number): void {
   const fx = Math.sin(head.yaw), fz = -Math.cos(head.yaw), rx = Math.cos(head.yaw), rz = Math.sin(head.yaw);
   u.panel.center = { x: head.position.x + fx * distance + rx * offset, y: head.position.y - 0.1, z: head.position.z + fz * distance + rz * offset };
   u.panel.yaw = -head.yaw;
@@ -341,7 +339,6 @@ function applyLayout(): boolean {
 // ---- gestures ----
 const classifier = new GestureClassifier();
 const hints = new HintTracker();
-const palm = new PalmMenuDetector();
 const tracking = new TrackingState();
 const touch = new DirectTouch<Panel & { uiId?: string }>();
 const mapperState = newMapperState();
@@ -360,14 +357,61 @@ const touchCursor = new Map<string, { display: number; window?: number; x: numbe
 
 const TIPS = [["thumb", "thumb-tip"], ["index", "index-finger-tip"], ["middle", "middle-finger-tip"], ["ring", "ring-finger-tip"], ["pinky", "pinky-finger-tip"]] as const;
 
-const visibleUi = (): UiPanel[] => uiPanels.filter((u) => u.visible);
+const visibleUi = (): UiLike[] => uiPanels.filter((u) => u.visible);
 const macPanels = (): Panel[] => allViews().map((v) => v.panel);
 
-function clickUi(u: UiPanel, y: number, time: number): void {
+/** Put a surface in front of the head, facing it. */
+function placeFront(u: UiLike, head: HeadFrame, distance: number, drop = 0.08): void { placeUi(u, head, 0, distance); u.panel.center.y = head.position.y - drop; u.sync(); }
+
+function toggleDeck(head: HeadFrame): void {
+  if (deck.visible) { deck.show(false); return; }
+  guide.show(false); sheet.show(false);
+  const d = { x: deck.panel.center.x - head.position.x, z: deck.panel.center.z - head.position.z };
+  const len = Math.hypot(d.x, d.z) || 1;
+  const keep = deckMoved && len < 2.5 && (d.x * Math.sin(head.yaw) - d.z * Math.cos(head.yaw)) / len > 0.5;
+  if (!keep) { placeFront(deck, head, 0.95, 0.12); deckMoved = false; }
+  deck.show(true);
+  conn.send({ type: "windows" });
+}
+
+function openGuide(head: HeadFrame): void { guideStep = 0; deck.show(false); sheet.show(false); placeFront(guide, head, 1.0); guide.show(true); }
+
+function surfaceAction(u: Surface, id: string, time: number): void {
+  if (id === "menu") { toggleDeck(lastHead); return; }
+  if (u === deck) {
+    if (id.startsWith("tab:")) { deckState.tab = id.slice(4) as DeckState["tab"]; deckState.page = 0; }
+    else if (id === "close") deck.show(false);
+    else if (id.startsWith("mode:")) setMode(id.slice(5) as Mode, time);
+    else if (id.startsWith("win:")) { const n = Number(id.slice(4)); if (windowViews.has(n)) removeWindowPanel(n); else addWindowPanel(n); }
+    else if (id === "search") { localAction("launcher", time); deck.show(false); }
+    else if (id.startsWith("page:")) deckState.page = Math.max(0, Math.min(pageCount(mac.windows.length) - 1, deckState.page + Number(id.slice(5))));
+    else if (id === "guide") openGuide(lastHead);
+    else if (id === "sheet") { deck.show(false); placeFront(sheet, lastHead, 1.0); sheet.show(true); }
+    else if (id === "log") showLog = !showLog;
+    else localAction(id, time);
+    return;
+  }
+  if (u === guide) {
+    if (id === "gNext") { if (guideStep >= GUIDE.length - 1) { guide.show(false); markIntroDone(localStorage); } else guideStep++; }
+    else if (id === "gBack") guideStep = Math.max(0, guideStep - 1);
+    else if (id === "gSkip") { guide.show(false); markIntroDone(localStorage); }
+    return;
+  }
+  if (u === sheet && (id === "sheetClose" || id === "sClose")) sheet.show(false);
+}
+
+function clickUi(u: UiLike, x: number, y: number, time: number): void {
+  if (u instanceof Surface) {
+    const z = u.zoneAt(x, y);
+    if (!z) return;
+    u.pressed = { id: z.id, until: time + 200 };
+    if (z.id === "drag") return;
+    note(`menu: ${z.label || z.id}`, time);
+    surfaceAction(u, z.id, time);
+    return;
+  }
   const i = rowIndexAt(y, u.slots());
   const row = u.rows[i];
-  if (u.id === "intro") { u.show(false); markIntroDone(localStorage); return; }
-  if (u.id === "gestures") { u.show(false); return; }
   if (u.id === "launcher") launcherFocused = true;
   const a = row?.action;
   if (!a) return;
@@ -386,7 +430,7 @@ const hitFn = (head: HeadFrame) => (ray: Ray) => {
 function pickAll(ray: Ray): Pick | undefined {
   const ui = pickPanelUi(ray);
   const mac = pickPanel(ray, macPanels());
-  if (ui && (!mac || ui.t <= mac.hit.t)) return { key: ui.u.id, ui: ui.u.id, display: -1, x: 0.5, y: ui.y, width: ui.u.panel.width, height: ui.u.panel.height, t: ui.t };
+  if (ui && (!mac || ui.t <= mac.hit.t)) return { key: ui.u.id, ui: ui.u.id, display: -1, x: ui.x, y: ui.y, width: ui.u.panel.width, height: ui.u.panel.height, t: ui.t };
   if (!mac) return undefined;
   return { key: keyOf(mac.panel), display: mac.hit.display, window: mac.hit.window, x: mac.hit.x, y: mac.hit.y, width: mac.panel.width, height: mac.panel.height, t: mac.hit.t };
 }
@@ -400,12 +444,16 @@ const handPoint = (hands: HandFrame[], hand: Hand): Vec3 | undefined => {
 /** What the pointer router decided: UI clicks, Mac messages (with the click ripple and tick), and panel moves in Arrange. */
 function handleAction(a: PointerAction, head: HeadFrame, world: HandFrame[], time: number): void {
   if (a.type === "hover") {
-    if (a.pick?.ui) { const u = uiPanels.find((x) => x.id === a.pick!.ui); if (u) uiHover = { id: u.id, row: rowIndexAt(a.pick.y, u.slots()), t: time }; }
+    if (a.pick?.ui) uiHover = { id: a.pick.ui, x: a.pick.x, y: a.pick.y, t: time };
     return;
   }
   if (a.type === "ui") {
     const u = uiPanels.find((x) => x.id === a.id);
-    if (u) { uiHover = { id: u.id, row: rowIndexAt(a.y, u.slots()), t: time }; clickUi(u, a.y, time); }
+    if (u) {
+      uiHover = { id: u.id, x: a.x, y: a.y, t: time };
+      if (u instanceof Surface && u.zoneAt(a.x, a.y)?.id === "drag") deckMove = { hand: a.hand };
+      clickUi(u, a.x, a.y, time);
+    }
     return;
   }
   if (a.type === "send") {
@@ -490,16 +538,6 @@ function persistSnips(force = false): void {
   if (sig !== snipSig || force) { snipSig = sig; saveSnips(localStorage, JSON.parse(sig) as SnipRecord[]); }
 }
 
-function snipRows(): Row[] {
-  const rows: Row[] = [{ text: `Snips (${snips.length})`, sub: "tap a row", header: true }, { text: snipMode ? "Drag a rectangle on a screen..." : "Snip a region", action: { kind: "local", id: "snipDraw" } }, { text: "Close all", action: { kind: "local", id: "snipsClear" } }];
-  for (const sn of snips.slice(0, 5)) {
-    const n = sn.id;
-    rows.push({ text: `Snip ${n}: ${sn.sourceKey.replace("display:", "Display ").replace("window:", "")}`, sub: sn.pinned ? "pinned (tap to free)" : "free (tap to pin)", action: { kind: "local", id: `snipPin:${n}` } });
-    rows.push({ text: `   close snip ${n}`, action: { kind: "local", id: `snipClose:${n}` } });
-  }
-  return rows;
-}
-
 /** Two-hand grab (Arrange and Real devices only); scroll, zoom and swipe go to the Mac in the other modes. */
 function handleGesture(ev: GestureEvent, head: HeadFrame, time: number): void {
   if (ev.type === "grab-start") { activePanel ??= macPanels()[0]; grabView = allViews().find((v) => v.panel === activePanel) ?? allViews()[0]; grabStart = grabView?.panel; if (grabView instanceof SnipView && grabView.pinned) { grabView = undefined; grabStart = undefined; } note("two-hand grab", time); return; }
@@ -532,11 +570,11 @@ function handleExtra(ev: ExtraEvent, head: HeadFrame, time: number): void {
   for (const m of extraToMessages(ev)) conn.send(m);
 }
 
-function pickPanelUi(ray: Ray): { u: UiPanel; y: number; t: number } | undefined {
-  let best: { u: UiPanel; y: number; t: number } | undefined;
+function pickPanelUi(ray: Ray): { u: UiLike; x: number; y: number; t: number } | undefined {
+  let best: { u: UiLike; x: number; y: number; t: number } | undefined;
   for (const u of visibleUi()) {
     const h = pickPanel(ray, [u.panel]);
-    if (h && (!best || h.hit.t < best.t)) best = { u, y: h.hit.y, t: h.hit.t };
+    if (h && (!best || h.hit.t < best.t)) best = { u, x: h.hit.x, y: h.hit.y, t: h.hit.t };
   }
   return best;
 }
@@ -652,7 +690,8 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
     placed = true;
     if (pokeMode) placeKeyboardInAir(head);
     applyLayout();
-    if (!introDone(localStorage)) { intro.setRows(INTRO.map((t, i) => ({ text: t, header: i < INTRO.length - 1 })).map((r, i, a) => (i === a.length - 1 ? { ...r, action: { kind: "local", id: "close" } } : r))); intro.show(true); placeUi(intro, head, 0, 1.0); }
+    placeChip(head);
+    if (!introDone(localStorage)) openGuide(head);
     log("info", "layout ready");
   }
 
@@ -664,24 +703,44 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   if (tracking.lost) { lostBar.setText("Hands not tracked: bring them into view"); lostBar.place({ x: head.position.x + Math.sin(head.yaw) * 0.8, y: head.position.y - 0.1, z: head.position.z - Math.cos(head.yaw) * 0.8 }, camera); }
 
   calibrate(input.worldHands, time);
-  if (!tracking.lost && wristFlip.update(time, input.frame.hands)) setMode(nextMode(mode), time);
+  if (!tracking.lost && wristFlip.update(time, input.frame.hands)) { toggleDeck(head); note("menu", time); }
   const pol = policy();
 
-  // palm-up menu follows the left hand
-  const open = palm.update(time, input.frame.hands);
-  if (open) {
-    const lw = input.worldHands.find((h) => h.hand === "left")?.joints.wrist;
-    if (lw) {
-      menu.show(true);
-      menu.setRows(menuRows(), uiHover?.id === "menu" ? uiHover.row : -1);
-      menu.panel.center = { x: lw.x, y: lw.y + 0.28, z: lw.z };
-      menu.panel.yaw = Math.atan2(head.position.x - lw.x, head.position.z - lw.z);
-      menu.sync();
-    }
-  } else if (menu.visible && !uiHover) menu.show(false);
-  if (snipList.visible) snipList.setRows(snipRows(), uiHover?.id === "snips" ? uiHover.row : -1);
-  if (launcher.visible) launcher.setRows(launcherRows(mac, launcherQuery, new Set(windowViews.keys())), uiHover?.id === "launcher" ? uiHover.row : -1);
+  // the menu, guide and cheat sheet: hover and press come from the select ray, content from the live state
+  const now = time;
   if (uiHover && time - uiHover.t > 300) uiHover = undefined;
+  for (const u of [chip, deck, guide, sheet]) u.hover = uiHover?.id === u.id ? u.zoneAt(uiHover.x, uiHover.y)?.id : undefined;
+  if (deck.visible) {
+    deckState.mode = mode; deckState.hand = handMode; deckState.distance = displayViews[0] ? headDistance(displayViews[0].panel, head.position) : 1.4;
+    deckState.env = ENVIRONMENTS.find((e) => e.id === env)!.label; deckState.calibrating = !!calibrating; deckState.deskSet = !pokeMode; deckState.log = showLog; deckState.snipMode = snipMode;
+    deckState.status = permissionProblems(permissions)[0] ?? (linkText.startsWith("Connected") ? "Connected to the Mac" : linkText);
+    deckState.windows = [...mac.windows].sort((a, b) => Number(windowViews.has(b.id)) - Number(windowViews.has(a.id))).map((w) => ({ id: w.id, app: w.app, title: w.title, open: windowViews.has(w.id) }));
+    deckState.snips = snips.map((x) => ({ id: x.id, source: x.sourceKey, pinned: x.pinned }));
+    deck.setZones(deckLayout(deckState), now, { thumbs: (id) => { const v = windowViews.get(id); return v?.hasVideo ? v.canvas : undefined; } }, deckState.tab === "windows" ? String(Math.floor(now / 800)) : "");
+  }
+  if (guide.visible) guide.setZones(guideLayout(guideStep), now);
+  if (sheet.visible) sheet.setZones(sheetLayout(), now);
+  const permBad = permissionProblems(permissions).length > 0;
+  chip.show(placed && !guide.visible);
+  chip.setZones(chipLayout(snipMode ? "Drag a box" : modeInfo(mode).label, permBad || linkText.startsWith("No ") ? "bad" : linkText.startsWith("Connected") ? "ok" : "wait", snipMode ? "snip" : modeIconOf(mode)), now);
+  if (launcher.visible) launcher.setRows(launcherRows(mac, launcherQuery, new Set(windowViews.keys())), uiHover?.id === "launcher" ? Math.floor(uiHover.y * launcher.slots()) : -1);
+
+  // moving the menu: grab its top bar with the select ray
+  if (deckMove) {
+    const ray = (tracking.lost ? {} : input.worldRays)[deckMove.hand];
+    if (!router.holding(deckMove.hand) || !ray) deckMove = undefined;
+    else if (deckMove.t === undefined) {
+      const h = pickPanel(ray, [deck.panel]);
+      if (h) { const p = { x: ray.origin.x + ray.direction.x * h.hit.t, y: ray.origin.y + ray.direction.y * h.hit.t, z: ray.origin.z + ray.direction.z * h.hit.t }; deckMove = { hand: deckMove.hand, t: h.hit.t, off: { x: p.x - deck.panel.center.x, y: p.y - deck.panel.center.y, z: p.z - deck.panel.center.z } }; }
+      else deckMove = undefined;
+    } else {
+      const c = { x: ray.origin.x + ray.direction.x * deckMove.t - deckMove.off.x, y: ray.origin.y + ray.direction.y * deckMove.t - deckMove.off.y, z: ray.origin.z + ray.direction.z * deckMove.t - deckMove.off.z };
+      deck.panel.center = c;
+      deck.panel.yaw = Math.atan2(head.position.x - c.x, head.position.z - c.z);
+      deck.sync();
+      deckMoved = true;
+    }
+  }
 
   // direct touch: the index finger of hands not typing
   const typists = typing(input.worldHands);
@@ -695,7 +754,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
     if (e.type === "hover" || e.type === "down" || e.type === "move") dots.push({ pos: surfacePoint(e.panel, e.x, e.y), yaw: e.panel.yaw, down: e.type !== "hover" });
     if (uiId) {
       const u = uiPanels.find((x) => x.id === uiId);
-      if (u && e.type === "down") clickUi(u, e.y, time);
+      if (u && e.type === "down") clickUi(u, e.x, e.y, time);
       continue;
     }
     const cur = { display: e.panel.display, window: e.panel.windowId, x: e.x, y: e.y };
@@ -776,7 +835,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
     hud.setLines(hudLines({ mode, last: lastNote, pinch: strongestPinch(input.frame.hands), tracking: trackingText(tracking.lost, input.frame.hands), now: time }));
     logBoard.setLines(["Gestures (newest first)", ...gestureLog.lines(time)]);
   }
-  hud.mesh.visible = !menu.visible;
+  hud.mesh.visible = showLog && !deck.visible;
   logBoard.mesh.visible = showLog;
   const fx = Math.sin(head.yaw), fz = -Math.cos(head.yaw), rx = Math.cos(head.yaw), rz = Math.sin(head.yaw);
   hud.place(leftWrist && !tracking.lost ? { x: leftWrist.x, y: leftWrist.y + 0.12, z: leftWrist.z } : { x: head.position.x + fx * 0.7 - rx * 0.28, y: head.position.y - 0.28, z: head.position.z + fz * 0.7 - rz * 0.28 }, camera);
@@ -811,15 +870,16 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
 
   // hints and status, a few times a second
   const hint = hints.update(input.frame);
-  hintBar.mesh.visible = !!hint && !tracking.lost;
+  hintBar.mesh.visible = !!hint && !tracking.lost && !deck.visible && !guide.visible && !sheet.visible;
   if (hint) { hintBar.setText(hint.text); const w = toWorld(hint.at, head); hintBar.place({ x: w.x, y: w.y + 0.18, z: w.z }, camera); }
   if (time - lastUi > 250) {
     lastUi = time;
     const first = sourceViews()[0]?.panel;
     persistSnips();
-    const text = [snipMode ? "Snip: pinch-drag a rectangle on a screen" : "", statusLine(linkText, stats, permissions), mac.notice].filter(Boolean).join(" | ");
+    // only a problem shows here; mode and link live in the Menu button
+    const text = [permissionProblems(permissions)[0], linkText.startsWith("Connected") ? "" : linkText, mac.notice].filter(Boolean).join(" | ");
     statusBar.setText(text);
-    statusBar.mesh.visible = true;
+    statusBar.mesh.visible = text !== "" && !deck.visible;
     if (first) statusBar.place({ x: first.center.x, y: first.center.y + first.height / 2 + 0.1, z: first.center.z }, camera);
   }
 }

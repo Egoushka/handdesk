@@ -10,7 +10,7 @@ export interface SelectEvent { type: "selectstart" | "selectend" | "squeezestart
 
 export type PointerAction =
   | { type: "hover"; hand: Hand; pick?: Pick }
-  | { type: "ui"; hand: Hand; id: string; y: number }
+  | { type: "ui"; hand: Hand; id: string; x: number; y: number }
   /** messages for the Mac; `gesture` names it for the HUD and log, absent for plain cursor moves */
   | { type: "send"; hand: Hand; messages: ClientMessage[]; gesture?: string; at?: Pick; ripple?: boolean }
   | { type: "arrange"; hand: Hand; phase: "start" | "move" | "end"; pick?: Pick; ray?: Ray; kind: "select" | "squeeze" };
@@ -50,7 +50,7 @@ export class PointerRouter {
       const h = this.held.get(e.hand);
       if (e.type === "selectstart" || e.type === "squeezestart") {
         const kind = e.type === "selectstart" ? "select" : "squeeze";
-        if (cur?.ui) { out.push({ type: "ui", hand: e.hand, id: cur.ui, y: cur.y }); this.held.set(e.hand, { kind, mode: "ui", dragging: false }); continue; }
+        if (cur?.ui) { out.push({ type: "ui", hand: e.hand, id: cur.ui, x: cur.x, y: cur.y }); this.held.set(e.hand, { kind, mode: "ui", dragging: false }); continue; }
         if (policy.arrange) {
           this.held.set(e.hand, { kind, mode: "arrange", start: cur, last: cur, dragging: false });
           out.push({ type: "arrange", hand: e.hand, phase: "start", pick: cur, ray: rays[e.hand], kind });
