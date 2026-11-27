@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { DECK_H, DECK_M, DECK_W, TABS, defaultDeck, deckLayout, pageCount, WINDOWS_PER_PAGE, type DeckState, type Tab } from "../src/ui/deck";
-import { GUIDE, GUIDE_H, GUIDE_W, SHEET, SHEET_H, SHEET_W, chipLayout, guideLayout, sheetLayout } from "../src/ui/guide";
+import { GUIDE, GUIDE_H, GUIDE_W, SHEET, SHEET_H, SHEET_W, guideLayout, sheetLayout } from "../src/ui/guide";
 import { MIN_TEXT, interactive, zoneAt, type Zone } from "../src/ui/zones";
 import { MODES } from "../src/modes/modes";
 import { PointerRouter } from "../src/input/pointer";
@@ -78,10 +78,5 @@ describe("guide, cheat sheet and Menu button", () => {
     const zs = sheetLayout();
     for (const z of zs) { expect(z.x + z.w).toBeLessThanOrEqual(SHEET_W); expect(z.y + z.h).toBeLessThanOrEqual(SHEET_H); }
     expect(zoneAt(zs, 0.5, 0.5, SHEET_W, SHEET_H)?.id).toBe("sheetClose");
-  });
-  it("the Menu button is one big target", () => {
-    const [z] = chipLayout("Point", "ok", "point");
-    expect(z!.id).toBe("menu");
-    expect(z!.h / (SHEET_W / 1.1)).toBeGreaterThan(0.08);
   });
 });

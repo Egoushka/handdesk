@@ -1,7 +1,7 @@
 import type { Zone } from "./zones";
 import type { IconName } from "./zones";
 
-/** The radial Menu: a ring of eight round actions around a hub, opened by pinching the Menu orb. Every power feature is one of these or one tap behind one. */
+/** The radial Menu: a ring of eight round actions around a hub, opened by holding the left palm up (it hovers above the palm and is poked with a finger), by the Menu handle on the screen frame, or by controller B/Y. Every power feature is one of these or one tap behind one. */
 export const RADIAL = 1200;
 export const RADIAL_M = 0.8;
 export const RADIAL_BTN = 270;
@@ -25,4 +25,17 @@ export function radialLayout(): Zone[] {
     z.push({ id: it.id, kind: "tile", x: Math.round(c + RADIAL_RING * Math.cos(a) - RADIAL_BTN / 2), y: Math.round(c + RADIAL_RING * Math.sin(a) - RADIAL_BTN / 2), w: RADIAL_BTN, h: RADIAL_BTN, label: it.label, icon: it.icon, danger: it.danger, size: 50 });
   });
   return z;
+}
+
+/** The radial item a thumbstick points at (stick up = Windows, clockwise), or undefined inside the dead zone. */
+export function stickSector(x: number, y: number): string | undefined {
+  if (Math.hypot(x, y) < 0.55) return undefined;
+  const a = (Math.atan2(x, -y) * 180) / Math.PI; // 0 = up, clockwise
+  const i = Math.round(((a + 360) % 360) / 45) % 8;
+  return RADIAL_ITEMS[i]!.id;
+}
+/** Centre of a radial item in 0..1 surface coordinates, for hover. */
+export function radialSectorUv(id: string): { x: number; y: number } {
+  const z = radialLayout().find((q) => q.id === id)!;
+  return { x: (z.x + z.w / 2) / RADIAL, y: (z.y + z.h / 2) / RADIAL };
 }

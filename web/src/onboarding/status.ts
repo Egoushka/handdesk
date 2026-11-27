@@ -41,7 +41,7 @@ export function statusLine(link: string, stats: Stats, permissions: Permissions 
 
 export const INTRO: string[] = [
   "Aim your hand at a panel and pinch: that is a click.",
-  "Left palm up: the mode menu. Flip your left wrist quickly: next mode.",
+  "Left palm up: the menu appears above it. Touch an item with your other index finger.",
   "The box by your left hand shows the mode and what it saw.",
   "Pinch now to start.",
 ];

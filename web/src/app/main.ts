@@ -10,10 +10,14 @@ import { HintTracker } from "../onboarding/hints";
 import { introDone, markIntroDone } from "../onboarding/palm";
 import { Stats, permissionProblems, type Permissions } from "../onboarding/status";
 import { Surface } from "../ui/surface";
-import { RADIAL, RADIAL_M, radialLayout } from "../ui/radial";
-import { BAR_H, BAR_PX_PER_M, ENTER_HINT, ButtonTapHold, HoldOnce, LIMIT_TEXT, PANIC_HOLD_MS, barLayout, canAddExtra } from "../ui/rescue";
+import { RADIAL, RADIAL_M, radialLayout, radialSectorUv, stickSector } from "../ui/radial";
+import { PalmMenu, NagClock } from "../input/palmMenu";
+import { palmNormal } from "../onboarding/palm";
+import { headRef } from "../space/tilt";
+import { easeOut } from "../ui/style";
+import { BAR_H, BAR_PX_PER_M, ENTER_HINT, ButtonTapHold, HoldOnce, LIMIT_TEXT, PANIC_HOLD_MS, barLayout, canAddExtra, handleLayout, HANDLE_M } from "../ui/rescue";
 import { DECK_H, DECK_M, DECK_W, deckLayout, pageCount, type DeckState } from "../ui/deck";
-import { CHIP_H, CHIP_M, CHIP_W, GUIDE, GUIDE_H, GUIDE_M, GUIDE_W, SHEET_H, SHEET_M, SHEET_W, chipLayout, guideLayout, modeIconOf, sheetLayout } from "../ui/guide";
+import { GUIDE, GUIDE_H, GUIDE_M, GUIDE_W, SHEET_H, SHEET_M, SHEET_W, guideLayout, sheetLayout } from "../ui/guide";
 import { TrackingState } from "../hands/rig";
 import { applyGrab, pickPanel, type Panel } from "../panel";
 import { gestureToMessages, keyActionToMessages, newMapperState, type ClientMessage } from "../protocol";
@@ -25,7 +29,7 @@ import { ArrangeDrag } from "../input/arrange";
 import { PointerRouter, type Pick, type PointerAction, type SelectEvent } from "../input/pointer";
 import { Trackpad } from "../input/trackpad";
 import { GestureLog, hudLines, strongestPinch, trackingText } from "../feedback/feedback";
-import { WristFlip, loadMode, modeInfo, policyOf, saveMode, type Mode } from "../modes/modes";
+import { loadMode, modeInfo, policyOf, saveMode, type Mode } from "../modes/modes";
 import { DISTANCE_STEP, SPAWN_DISTANCE, SPAWN_WIDTH, headDistance, panelInFront, withDistance } from "../space/surface";
 import { extraToMessages } from "../gesture/extraMessages";
 import { effectiveHandMode, loadHandMode, saveHandMode, type HandMode } from "../hands/mode";
@@ -112,11 +116,10 @@ let lastHead: HeadFrame = { position: { x: 0, y: 1.6, z: 0 }, yaw: 0 };
 const deck = new Surface("deck", DECK_M, DECK_W, DECK_H);
 const guide = new Surface("guide", GUIDE_M, GUIDE_W, GUIDE_H);
 const sheet = new Surface("sheet", SHEET_M, SHEET_W, SHEET_H);
-const chip = new Surface("menu", CHIP_M, CHIP_W, CHIP_H, "orb");
 const radial = new Surface("radial", RADIAL_M, RADIAL, RADIAL, "radial");
 const launcher = new UiPanel("launcher", 0.8, 1.15, 26);
 type UiLike = UiPanel | Surface;
-const uiPanels: UiLike[] = [chip, deck, launcher, guide, sheet, radial];
+const uiPanels: UiLike[] = [deck, launcher, guide, sheet, radial];
 for (const u of uiPanels) scene.add(u.mesh);
 const deckState: DeckState = { tab: "windows", mode: "point", hand: "virtual", distance: 1.4, env: "", status: "", windows: [], page: 0, snips: [], snipMode: false, calibrating: false, deskSet: false, log: false, dimmed: false };
 let guideStep = 0;
@@ -176,7 +179,7 @@ function syncDisplays(n: number, list: { name: string; width: number; height: nu
     if (displayViews[i]) return;
     const width = SPAWN_WIDTH;
     const panel: Panel = { display: i, center: { x: i * (width + 0.1), y: 1.6, z: -SPAWN_DISTANCE }, yaw: 0, width, height: width * (d.height / d.width), curve: 0.5 };
-    const v = new PanelView(panel, d.pixelWidth, d.pixelHeight, d.name || `Display ${i + 1}`);
+    const v = new PanelView(panel, d.pixelWidth, d.pixelHeight, d.name || `Display ${i + 1}`, 0.03);
     displayViews.push(v);
     scene.add(v.mesh);
     ensureBar(v, () => (displayViews.length > 1 ? `Screen ${i + 1}` : "Mac screen"), false);
@@ -194,6 +197,7 @@ function addWindowPanel(id: number): void {
   const v = new PanelView(panel, Math.round(w.width * 2), Math.round(w.height * 2), `${w.app}: ${w.title || "window"}`);
   windowViews.set(id, v);
   scene.add(v.mesh);
+  flyFromScreen(v);
   ensureBar(v, () => `${w.app}: ${w.title || "window"}`, true);
   conn.subscribe(displayViews.map((_, i) => i), [...windowViews.keys()]);
   conn.send({ type: "raise", window: id }); // the Mac window comes forward too
@@ -205,15 +209,36 @@ function removeWindowPanel(id: number): void {
   if (!v) return;
   fadeOut(v.mesh);
   removeBar(v);
+  const fi = flights.findIndex((f) => f.v === v); if (fi >= 0) flights.splice(fi, 1);
   for (const sn of snips.filter((x) => x.panel.windowId === id)) { if (sn.pinned) pendingSnips.push(recordOf(sn)); dropSnip(sn); }
   windowViews.delete(id);
   conn.subscribe(displayViews.map((_, i) => i), [...windowViews.keys()]);
 }
 
+// ---- opening windows fly out of the main screen toward you ----
+const flights: { v: Placed; from: Vec3; to: Vec3; start: number }[] = [];
+const FLIGHT_MS = 300;
+function flyFromScreen(v: Placed, from?: Vec3): void {
+  const src = from ?? displayViews[0]?.panel.center;
+  if (!src) return;
+  flights.push({ v, from: { ...src }, to: { ...v.panel.center }, start: performance.now() });
+  v.panel.center = { ...src };
+  v.sync();
+}
+function updateFlights(now: number): void {
+  for (let i = flights.length - 1; i >= 0; i--) {
+    const f = flights[i]!;
+    const k = easeOut((now - f.start) / FLIGHT_MS);
+    f.v.panel.center = { x: f.from.x + (f.to.x - f.from.x) * k, y: f.from.y + (f.to.y - f.from.y) * k, z: f.from.z + (f.to.z - f.from.z) * k };
+    f.v.sync();
+    if (now - f.start >= FLIGHT_MS) flights.splice(i, 1);
+  }
+}
+
 // ---- materialise and dissolve ----
 const fading: { objs: THREE.Object3D[]; start: number; out: boolean }[] = [];
 const FADE_MS = 320;
-const eachMat = (o: THREE.Object3D, fn: (m: THREE.MeshBasicMaterial) => void): void => o.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined; if (m && "opacity" in m) fn(m); });
+const eachMat = (o: THREE.Object3D, fn: (m: THREE.MeshBasicMaterial, base: number) => void): void => o.traverse((c) => { const m = (c as THREE.Mesh).material as THREE.MeshBasicMaterial | undefined; if (m && "opacity" in m) fn(m, (c.userData.baseOp as number | undefined) ?? 1); });
 function fadeIn(...objs: THREE.Object3D[]): void {
   for (const o of objs) eachMat(o, (m) => { m.transparent = true; });
   fading.push({ objs, start: performance.now(), out: false });
@@ -228,9 +253,9 @@ function updateFades(): void {
     const f = fading[i]!;
     const k = Math.min(1, (now - f.start) / FADE_MS);
     const a = f.out ? 1 - k : k;
-    for (const o of f.objs) { eachMat(o, (m) => { m.opacity = a; }); const sc = 0.88 + 0.12 * a; o.scale.set(sc, sc, 1); }
+    for (const o of f.objs) { eachMat(o, (m, base) => { m.opacity = a * base; }); const sc = 0.88 + 0.12 * a; o.scale.set(sc, sc, 1); }
     if (k >= 1) {
-      for (const o of f.objs) { o.scale.set(1, 1, 1); eachMat(o, (m) => { m.opacity = 1; }); if (f.out) scene.remove(o); }
+      for (const o of f.objs) { o.scale.set(1, 1, 1); eachMat(o, (m, base) => { m.opacity = base; }); if (f.out) scene.remove(o); }
       fading.splice(i, 1);
     }
   }
@@ -241,7 +266,7 @@ function updateFades(): void {
 const bars = new Map<Placed, { bar: Surface; title: () => string; closable: boolean }>();
 const barOwner = new Map<Surface, Placed>();
 function ensureBar(v: Placed, title: () => string, closable: boolean): void {
-  const m = Math.min(1.2, Math.max(0.45, v.panel.width));
+  const m = closable ? Math.min(1.2, Math.max(0.45, v.panel.width)) : HANDLE_M;
   const bar = new Surface(`bar${barOwner.size}-${Math.random().toString(36).slice(2, 6)}`, m, Math.round(m * BAR_PX_PER_M), BAR_H);
   bars.set(v, { bar, title, closable });
   barOwner.set(bar, v);
@@ -261,6 +286,15 @@ function removeBar(v: Placed): void {
 function updateBars(time: number): void {
   for (const [v, b] of bars) {
     const p = v.panel;
+    if (!b.closable) {
+      // the Menu handle: a small tab on the lower right of the screen's frame, in the glass edge's plane
+      const off = p.width / 2 - b.bar.panel.width / 2 - 0.02;
+      b.bar.panel.center = { x: p.center.x + Math.cos(p.yaw) * off, y: p.center.y - p.height / 2 - b.bar.panel.height / 2 - 0.03, z: p.center.z - Math.sin(p.yaw) * off + 0.01 };
+      b.bar.panel.yaw = p.yaw;
+      b.bar.sync();
+      b.bar.setZones(handleLayout(b.bar.W), time);
+      continue;
+    }
     b.bar.panel.center = { x: p.center.x, y: p.center.y + p.height / 2 + b.bar.panel.height / 2 + 0.012, z: p.center.z };
     b.bar.panel.yaw = p.yaw;
     b.bar.sync();
@@ -304,16 +338,8 @@ function panic(head: HeadFrame): void {
 
 /** Recenter the display row. Window panels keep their own place: they spawn near the head and are moved by hand. */
 function arrange(head: HeadFrame): void {
-  placeChip(head);
   const views = displayViews;
   recenterPanels(views.map((v) => v.panel), head).forEach((p, i) => { views[i]!.panel = p; views[i]!.sync(); });
-}
-
-/** Without a tracked left wrist (controllers) the Menu orb floats low and to the left in front of the head; recenter brings it back. */
-function placeChip(head: HeadFrame): void {
-  placeUi(chip, head, -0.3, 0.75);
-  chip.panel.center.y = head.position.y - 0.4;
-  chip.sync();
 }
 
 // ---- modes and feedback ----
@@ -323,7 +349,10 @@ const kbOn = (): boolean => policy().keyboard || launcher.visible;
 const router = new PointerRouter();
 const trackpad = new Trackpad();
 const arrangeDrag = new ArrangeDrag();
-const wristFlip = new WristFlip();
+const palmMenu = new PalmMenu();
+const nag = new NagClock(performance.now());
+let radialMode: "palm" | "front" = "front";
+let palmOpenAt = 0;
 const gestureLog = new GestureLog(10);
 const selQueue: SelectEvent[] = [];
 let lastNote: { name: string; hand?: Hand; time: number } | undefined;
@@ -475,13 +504,28 @@ function toggleDeck(head: HeadFrame): void {
   conn.send({ type: "windows" });
 }
 
-/** The Menu orb or a wrist flip: the radial menu opens, or whatever menu is open closes. */
+/** The Menu handle on the screen frame or controller B/Y: the radial opens in front of you, or whatever menu is open closes. The palm opens it through `openPalmMenu`. */
 function toggleMenu(head: HeadFrame): void {
-  if (radial.visible || deck.visible) { radial.show(false); deck.show(false); return; }
+  nag.used(performance.now());
+  if (radial.visible || deck.visible) { radial.show(false); deck.show(false); palmMenu.dismiss(); return; }
   guide.show(false); sheet.show(false);
+  radialMode = "front";
+  palmMenu.external();
+  radial.setWidth(0.7);
   placeFront(radial, head, 0.8, 0.05);
   radial.show(true);
   if (audio) tickSound(audio);
+}
+/** Palm up: the menu materialises above the palm; it follows the hand until the palm turns away or something is chosen. */
+function openPalmMenu(head: HeadFrame, time: number): void {
+  if (radial.visible) return;
+  nag.used(time);
+  guide.show(false); sheet.show(false);
+  radialMode = "palm"; palmOpenAt = time;
+  radial.setWidth(0.3);
+  radial.show(true);
+  if (audio) tickSound(audio);
+  log("info", "palm menu");
 }
 function openDeckTab(tab: DeckState["tab"], head: HeadFrame): void {
   radial.show(false);
@@ -492,6 +536,7 @@ function openDeckTab(tab: DeckState["tab"], head: HeadFrame): void {
 function openGuide(head: HeadFrame): void { guideStep = 0; deck.show(false); sheet.show(false); placeFront(guide, head, 1.0); guide.show(true); }
 
 function radialAction(id: string, time: number): void {
+  nag.used(time);
   if (id === "r:close") { radial.show(false); return; }
   if (id === "closeExtras") { panic(lastHead); return; }
   if (id === "r:arrange") { setMode("arrange", time); radial.show(false); notify("Arrange: grab a panel, flick it away to close it", 3500); return; }
@@ -500,9 +545,10 @@ function radialAction(id: string, time: number): void {
 }
 
 function surfaceAction(u: Surface, id: string, time: number): void {
+  nag.used(time);
   const owner = barOwner.get(u);
   if (owner) { if (id === "x") closeView(owner); else if (id === "menu") toggleMenu(lastHead); return; }
-  if (u === radial) { radialAction(id, time); return; }
+  if (u === radial) { radialAction(id, time); if (!radial.visible) palmMenu.dismiss(); return; }
   if (id === "menu") { toggleMenu(lastHead); return; }
   if (u === deck) {
     if (id.startsWith("tab:")) { deckState.tab = id.slice(4) as DeckState["tab"]; deckState.page = 0; }
@@ -661,6 +707,7 @@ function createSnip(src: PanelView, rect: Rect, rec?: SnipRecord): void {
   const v = new SnipView(++snipSeq, sourceKey(src), src.texture, panel, !!rec);
   snips.push(v);
   scene.add(v.mesh);
+  if (!rec) flyFromScreen(v, src.panel.center);
   ensureBar(v, () => `Snip: ${src.panel.windowId === undefined ? "screen" : (mac.windows.find((w) => w.id === src.panel.windowId)?.app ?? "window")}`, true);
   if (!rec) log("info", `snip created from ${v.sourceKey}`);
 }
@@ -837,7 +884,6 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
     placed = true;
     if (pokeMode) placeKeyboardInAir(head);
     applyLayout();
-    placeChip(head);
     if (!introDone(localStorage)) openGuide(head);
     notify(ENTER_HINT, 12000);
     try { speechSynthesis.speak(new SpeechSynthesisUtterance(ENTER_HINT)); } catch { /* no speech here */ }
@@ -852,28 +898,46 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   if (tracking.lost) { lostBar.setText("Hands not tracked: bring them into view"); lostBar.place({ x: head.position.x + Math.sin(head.yaw) * 0.8, y: head.position.y - 0.1, z: head.position.z - Math.cos(head.yaw) * 0.8 }, camera); }
 
   calibrate(input.worldHands, time);
-  if (!tracking.lost && wristFlip.update(time, input.frame.hands)) { toggleMenu(head); note("menu", time); }
+  headRef.x = head.position.x; headRef.y = head.position.y; headRef.z = head.position.z;
+  {
+    const left = input.frame.hands.find((h) => h.hand === "left");
+    const pe = palmMenu.update(time, !tracking.lost && left ? palmNormal(left)?.y : undefined);
+    if (pe === "open") { openPalmMenu(head, time); note("menu", time); }
+    else if (pe === "close" && radialMode === "palm") radial.show(false);
+    if (radial.visible && radialMode === "palm") {
+      const wj = input.worldHands.find((h) => h.hand === "left")?.joints;
+      const pp = wj?.["middle-finger-metacarpal"] ?? wj?.wrist;
+      if (pp) {
+        const k = easeOut((time - palmOpenAt) / 220);
+        radial.setWidth(0.3 + 0.1 * k);
+        const tgt = { x: pp.x, y: pp.y + 0.1 + radial.panel.height / 2, z: pp.z };
+        const c = radial.panel.center;
+        const f = time - palmOpenAt < 40 ? 1 : 0.4;
+        radial.panel.center = { x: c.x + (tgt.x - c.x) * f, y: c.y + (tgt.y - c.y) * f, z: c.z + (tgt.z - c.z) * f };
+        radial.panel.yaw = Math.atan2(head.position.x - radial.panel.center.x, head.position.z - radial.panel.center.z);
+        radial.sync();
+      }
+    }
+  }
   const pol = policy();
 
   // the menu, guide and cheat sheet: hover and press come from the select ray, content from the live state
   const now = time;
   if (uiHover && time - uiHover.t > 300) uiHover = undefined;
-  for (const u of [chip, deck, guide, sheet, radial, ...barOwner.keys()]) u.hover = uiHover?.id === u.id ? u.zoneAt(uiHover.x, uiHover.y)?.id : undefined;
+  for (const u of [deck, guide, sheet, radial, ...barOwner.keys()]) u.hover = uiHover?.id === u.id ? u.zoneAt(uiHover.x, uiHover.y)?.id : undefined;
   if (deck.visible) {
     deckState.mode = mode; deckState.hand = handMode; deckState.distance = displayViews[0] ? headDistance(displayViews[0].panel, head.position) : 1.4;
     deckState.env = ENVIRONMENTS.find((e) => e.id === env)!.label; deckState.calibrating = !!calibrating; deckState.deskSet = !pokeMode; deckState.log = showLog; deckState.snipMode = snipMode;
     deckState.status = permissionProblems(permissions)[0] ?? (linkText.startsWith("Connected") ? "Connected to the Mac" : linkText);
     deckState.windows = [...mac.windows].sort((a, b) => Number(windowViews.has(b.id)) - Number(windowViews.has(a.id))).map((w) => ({ id: w.id, app: w.app, title: w.title, open: windowViews.has(w.id) }));
     deckState.snips = snips.map((x) => ({ id: x.id, source: x.sourceKey, pinned: x.pinned }));
-    deck.setZones(deckLayout(deckState), now, { thumbs: (id) => { const v = windowViews.get(id); return v?.hasVideo ? v.canvas : undefined; } }, deckState.tab === "windows" ? String(Math.floor(now / 800)) : "");
+    deck.overview(deckState.tab === "windows");
+    deck.setZones(deckLayout(deckState), now, { skipThumbTiles: deckState.tab === "windows", thumbs: (id) => { const v = windowViews.get(id); return v?.hasVideo ? v.canvas : undefined; } }, deckState.tab === "windows" ? String(Math.floor(now / 800)) : "");
   }
   if (guide.visible) guide.setZones(guideLayout(guideStep), now);
   if (radial.visible) radial.setZones(radialLayout(), now);
   if (sheet.visible) sheet.setZones(sheetLayout(), now);
-  const permBad = permissionProblems(permissions).length > 0;
-  chip.show(placed);
   updateBars(time);
-  chip.setZones(chipLayout(snipMode ? "Drag a box" : modeInfo(mode).label, permBad || linkText.startsWith("No ") ? "bad" : linkText.startsWith("Connected") ? "ok" : "wait", snipMode ? "snip" : modeIconOf(mode)), now);
   if (launcher.visible) launcher.setRows(launcherRows(mac, launcherQuery, new Set(windowViews.keys())), uiHover?.id === "launcher" ? Math.floor(uiHover.y * launcher.slots()) : -1);
 
   // moving the menu: grab its top bar with the select ray
@@ -971,20 +1035,17 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
   const bp = btn.update(time, input.frame.controllers.some((c) => c.buttonB));
   if (bp === "tap") { toggleMenu(head); note("menu", time); } else if (bp === "hold") { panic(head); note("reset", time); }
   if (!tracking.lost && fistHold.update(time, fistsActive.size >= 2)) { panic(head); note("reset", time); }
-  // the Menu button follows the gaze when it has been out of view for a moment
-  const toChip = Math.atan2(chip.panel.center.x - head.position.x, -(chip.panel.center.z - head.position.z)) - head.yaw;
-  const off = Math.abs(Math.atan2(Math.sin(toChip), Math.cos(toChip)));
-  const lw = input.worldHands.find((h) => h.hand === "left")?.joints.wrist;
-  if (lw && !tracking.lost) {
-    // the orb rides above the left wrist, turned to the head
-    const tgt = { x: lw.x, y: lw.y + 0.14, z: lw.z };
-    const c = chip.panel.center;
-    const k = 0.35;
-    chip.panel.center = { x: c.x + (tgt.x - c.x) * k, y: c.y + (tgt.y - c.y) * k, z: c.z + (tgt.z - c.z) * k };
-    chip.panel.yaw = Math.atan2(head.position.x - chip.panel.center.x, head.position.z - chip.panel.center.z);
-    chip.sync();
-    chipAway = undefined;
-  } else if (off > 0.75) { chipAway ??= time; if (time - chipAway > 1500) { placeChip(head); chipAway = undefined; } } else chipAway = undefined;
+  // controllers: the thumbstick picks a sector of the open radial, the trigger chooses it
+  if (radial.visible) {
+    const c = input.frame.controllers.find((x) => Math.hypot(x.stickX, x.stickY) > 0.55);
+    const sec = c && stickSector(c.stickX, c.stickY);
+    if (sec) uiHover = { id: radial.id, x: radialSectorUv(sec).x, y: radialSectorUv(sec).y, t: time };
+    const trig = input.frame.controllers.some((x) => x.trigger);
+    if (trig && !stickTrig && sec) { radial.pressed = { id: sec, until: time + 200 }; radialAction(sec, time); if (!radial.visible) palmMenu.dismiss(); }
+    stickTrig = trig;
+  } else stickTrig = false;
+  for (const u of uiPanels) if (u instanceof Surface && u.visible) u.animate(time, { thumbs: (id) => { const v = windowViews.get(id); return v?.hasVideo ? v.canvas : undefined; } }, Math.floor(time / 800).toString());
+  updateFlights(time);
   updateFades();
   const rt = input.worldHands.find((h) => h.hand === "right")?.joints["index-finger-tip"];
   const recentNote = lastNote && time - lastNote.time < 1400 ? lastNote.name : undefined;
@@ -1044,7 +1105,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
 
   // hints and status, a few times a second
   const hint = hints.update(input.frame);
-  hintBar.mesh.visible = !!hint && !tracking.lost && !deck.visible && !guide.visible && !sheet.visible;
+  hintBar.mesh.visible = !!hint && !nag.quiet(time) && !tracking.lost && !deck.visible && !guide.visible && !sheet.visible;
   if (hint) { hintBar.setText(hint.text); const w = toWorld(hint.at, head); hintBar.place({ x: w.x, y: w.y + 0.18, z: w.z }, camera); }
   if (time - lastUi > 250) {
     lastUi = time;
@@ -1061,7 +1122,7 @@ function frame(input: NonNullable<ReturnType<typeof readInput>>, time: number): 
 const btn = new ButtonTapHold();
 const fistHold = new HoldOnce(PANIC_HOLD_MS);
 const fistsActive = new Set<Hand>();
-let chipAway: number | undefined;
+let stickTrig = false;
 const button = (c: { display: number; window?: number; x: number; y: number }, down: boolean): ClientMessage =>
   c.window === undefined ? { type: "button", display: c.display, button: "left", down, x: c.x, y: c.y } : { type: "button", window: c.window, button: "left", down, x: c.x, y: c.y };
 function sendCursor(_: "move", c: { display: number; window?: number; x: number; y: number }): void {

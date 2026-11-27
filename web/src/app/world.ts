@@ -8,6 +8,8 @@ import type { Handle } from "../space/handles";
 import type { TypingPlane } from "../keyboard/plane";
 import type { Key, Lang, Modifier } from "../keyboard/layouts";
 import { PITCH } from "../keyboard/layouts";
+import { Glass } from "../space/glass";
+import { headRef, tiltToward } from "../space/tilt";
 
 function panelGeometry(p: Panel): THREE.BufferGeometry {
   const n = p.curve < 1e-3 ? 1 : 48;
@@ -39,8 +41,9 @@ export class PanelView {
   private w = 0;
   private h = 0;
   hasVideo = false;
+  readonly glass: Glass;
 
-  constructor(public panel: Panel, pixelW: number, pixelH: number, label: string) {
+  constructor(public panel: Panel, pixelW: number, pixelH: number, label: string, slabDepth = 0.022) {
     this.canvas.width = Math.min(pixelW, 2560);
     this.canvas.height = Math.round(this.canvas.width * (pixelH / pixelW));
     this.ctx = this.canvas.getContext("2d")!;
@@ -53,6 +56,9 @@ export class PanelView {
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.mesh = new THREE.Mesh(panelGeometry(panel), new THREE.MeshBasicMaterial({ map: this.texture, side: THREE.DoubleSide }));
+    this.mesh.rotation.order = "YXZ";
+    this.glass = new Glass(slabDepth);
+    this.mesh.add(this.glass.group);
     this.sync();
   }
 
@@ -69,8 +75,9 @@ export class PanelView {
       this.mesh.geometry = panelGeometry(p);
       this.curve = p.curve; this.w = p.width; this.h = p.height;
     }
+    this.glass.fit(p);
     this.mesh.position.set(p.center.x, p.center.y, p.center.z);
-    this.mesh.rotation.set(0, p.yaw, 0);
+    this.mesh.rotation.set(tiltToward(p.center, headRef), p.yaw, 0);
   }
 }
 
