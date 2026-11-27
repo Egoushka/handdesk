@@ -136,7 +136,7 @@ export function deckLayout(s: DeckState): Zone[] {
       { id: "sheet", kind: "tile" as const, x, y: 0, w, h: 0, label: "Gestures", sub: "One-page cheat sheet", icon: "list" },
       { id: "log", kind: "tile" as const, x, y: 0, w, h: 0, label: s.log ? "Log on" : "Log off", sub: "What the app saw", icon: "list", active: s.log },
     ] as Zone[])[i]!));
-    z.push({ id: "note", kind: "text", x: CX, y: CY + 420 + GAP + 10, w: CW, h: 200, label: "Flip your left wrist, or tap Menu under the screen, to open or close this panel. Drag the top bar to move it.", size: 50, align: "center" });
+    z.push({ id: "note", kind: "text", x: CX, y: CY + 420 + GAP + 10, w: CW, h: 200, label: "Hold your left palm up, or tap Menu on the screen frame, to open or close this panel. Drag the top bar to move it.", size: 50, align: "center" });
   }
   for (const q of z) if (q.kind === "text" && (q.size ?? MIN_TEXT) < MIN_TEXT) q.size = MIN_TEXT;
   return z;

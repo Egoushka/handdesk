@@ -4,7 +4,7 @@ import type { Zone } from "./zones";
 export const MAX_EXTRAS = 6;
 export const canAddExtra = (count: number): boolean => count < MAX_EXTRAS;
 export const LIMIT_TEXT = `Limit: ${MAX_EXTRAS} extra panels. Close one with its X, or use Close all extras in the menu.`;
-export const ENTER_HINT = "Pinch the Menu orb, or flip your left wrist";
+export const ENTER_HINT = "Hold your left palm up for the menu";
 export const PANIC_HOLD_MS = 1500;
 
 /** True once, when `active` has been true for `ms` without a break; re-arms after it goes false. */
@@ -49,4 +49,10 @@ export function barLayout(W: number, title: string, closable: boolean): Zone[] {
       ? { id: "x", kind: "button", x: W - bw - 12, y: 12, w: bw, h: BAR_H - 24, label: "Close", icon: "close", size: 60, danger: true }
       : { id: "menu", kind: "button", x: W - bw - 12, y: 12, w: bw, h: BAR_H - 24, label: "Menu", icon: "menu", size: 56, primary: true },
   ];
+}
+
+/** The small Menu handle on the main screen's frame (not on the body). */
+export const HANDLE_M = 0.2;
+export function handleLayout(W: number): Zone[] {
+  return [{ id: "menu", kind: "button", x: 8, y: 8, w: W - 16, h: BAR_H - 16, label: "Menu", icon: "menu", size: 56 }];
 }

@@ -2,12 +2,17 @@ import * as THREE from "three";
 import type { Panel } from "../panel";
 import { panelPoint } from "../space/surface";
 import { cropUv, type Rect } from "./rect";
+import { Glass } from "../space/glass";
+import { headRef, tiltToward } from "../space/tilt";
 
 /** A floating live crop of a panel: the same texture as its source with the uv cut to the region, so no extra capture. */
 export class SnipView {
   readonly mesh = new THREE.Group();
   private readonly frame: THREE.LineLoop;
   private readonly quad: THREE.Mesh;
+  /** the picture and its frame, scaled to the snip size; the glass slab is not scaled */
+  private readonly inner = new THREE.Group();
+  private readonly glass = new Glass(0.016, true, 0.012);
   constructor(readonly id: number, readonly sourceKey: string, texture: THREE.Texture, public panel: Panel, public pinned: boolean) {
     const geo = new THREE.PlaneGeometry(1, 1);
     geo.setAttribute("uv", new THREE.Float32BufferAttribute(cropUv(panel.crop!), 2));
@@ -16,7 +21,9 @@ export class SnipView {
       new THREE.BufferGeometry().setFromPoints([new THREE.Vector3(-0.5, -0.5, 0.001), new THREE.Vector3(0.5, -0.5, 0.001), new THREE.Vector3(0.5, 0.5, 0.001), new THREE.Vector3(-0.5, 0.5, 0.001)]),
       new THREE.LineBasicMaterial({ color: 0x67e8f9 }),
     );
-    this.mesh.add(this.quad, this.frame);
+    this.inner.add(this.quad, this.frame);
+    this.mesh.rotation.order = "YXZ";
+    this.mesh.add(this.inner, this.glass.group);
     this.mesh.renderOrder = 1;
     this.setPinned(pinned);
     this.sync();
@@ -28,8 +35,9 @@ export class SnipView {
   sync(): void {
     const p = this.panel;
     this.mesh.position.set(p.center.x, p.center.y, p.center.z);
-    this.mesh.rotation.set(0, p.yaw, 0);
-    this.mesh.scale.set(p.width, p.height, 1);
+    this.mesh.rotation.set(tiltToward(p.center, headRef), p.yaw, 0);
+    this.inner.scale.set(p.width, p.height, 1);
+    this.glass.fit({ width: p.width, height: p.height, curve: 0 });
   }
 }
 
