@@ -39,21 +39,9 @@ export function statusLine(link: string, stats: Stats, permissions: Permissions 
   return problems.length > 0 ? `${bits.join(" | ")} | ${problems[0]}` : bits.join(" | ");
 }
 
-export const CHEAT_SHEET: string[] = [
-  "Point: your hand ray moves the pointer",
-  "Pinch thumb and index: click; hold and move: drag",
-  "Thumb and middle: right click",
-  "Thumb on index and middle, move the hand: scroll",
-  "L shape, change the gap: zoom",
-  "Three fingers, swipe 10 cm: Spaces and Mission Control",
-  "Both hands pinching: move, turn, resize a panel",
-  "Touch a panel within reach: tap and drag",
-  "Left palm up: this menu",
-];
-
 export const INTRO: string[] = [
-  "Point with your hand. Pinch to click.",
-  "Pinch with both hands to move a panel.",
-  "Hold your left palm up for the cheat sheet.",
+  "Aim your hand at a panel and pinch: that is a click.",
+  "Left palm up: the mode menu. Flip your left wrist quickly: next mode.",
+  "The box by your left hand shows the mode and what it saw.",
   "Pinch now to start.",
 ];
