@@ -5,7 +5,7 @@
 #   scripts/sign-mac.sh [path/to/handdesk]
 set -uo pipefail
 root="$(cd "$(dirname "$0")/.." && pwd)"
-bin="${1:-$root/agent/.build/release/handdesk}"
+bin="${1:-$(cd "$root/agent" && swift build -c release --show-bin-path)/handdesk}"
 name="handdesk local"
 ident="online.hrabovskyi.handdesk"
 # A dedicated keychain with an empty password: the login keychain is locked in a non-GUI (ssh) session and refuses imports there.
