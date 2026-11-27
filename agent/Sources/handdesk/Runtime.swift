@@ -15,8 +15,9 @@ func currentPermissions() -> Permissions {
 
 enum Shell {
     /// Runs a program and returns its exit status and combined output; kills it after `timeout` seconds.
-    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 8) -> (status: Int32, output: String) {
+    static func run(_ path: String, _ args: [String], timeout: TimeInterval = 8, environment: [String: String]? = nil) -> (status: Int32, output: String) {
         let p = Process()
+        if let environment { p.environment = ProcessInfo.processInfo.environment.merging(environment) { $1 } }
         p.executableURL = URL(fileURLWithPath: path)
         p.arguments = args
         let pipe = Pipe()
@@ -139,11 +140,13 @@ func commandOpen(port: UInt16) -> Never {
     guard let adb = adbPath() else { fail("adb not found: install android-platform-tools") }
     let token: String
     do { token = try Token.loadOrCreate(at: tokenURL) } catch { fail("cannot read the pairing token: \(error.localizedDescription)") }
-    let url = Adb.pageURL(port: port, token: token)
+    // with a certificate the headset opens the https name (no cable needed afterwards); otherwise localhost through adb reverse
+    let tls = CertCommand.active()
+    let url = tls.map { Cert.pageURL(host: $0.host, port: port, token: token) } ?? Adb.pageURL(port: port, token: token)
     var opened = 0
     for s in adbDevices(adb) {
         // the page needs the reverse: set it now and fail loudly if it cannot be
-        if !Adb.hasReverse(Shell.run(adb, Adb.reverseListArgs(serial: s)).output, port: port),
+        if tls == nil, !Adb.hasReverse(Shell.run(adb, Adb.reverseListArgs(serial: s)).output, port: port),
            Shell.run(adb, Adb.reverseArgs(serial: s, port: port)).status != 0 { log.error("adb", ["action": "reverse_failed", "serial": s]); fail("adb reverse failed on \(s); the page would not load") }
         // adb echoes the intent, which contains the URL: the output is never printed or logged
         if Shell.run(adb, Adb.openArgs(serial: s, url: url)).status == 0 { opened += 1; log.info("adb", ["action": "opened_page", "serial": s]) }
