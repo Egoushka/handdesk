@@ -25,7 +25,7 @@ import { DISTANCE_STEP, SPAWN_DISTANCE, SPAWN_WIDTH, headDistance, panelInFront,
 import { extraToMessages } from "../gesture/extraMessages";
 import { effectiveHandMode, HAND_MODES, loadHandMode, nextHandMode, saveHandMode, type HandMode } from "../hands/mode";
 import { SkinnedHands } from "../hands/skin";
-import { sessionInit } from "./session";
+import { sessionInit, startErrorText } from "./session";
 import { ENVIRONMENTS, isVr, loadLayout, nextEnvironment, recenterPanels, saveLayout, type EnvId } from "../space/layout";
 import { Connection } from "./connection";
 import { dirToWorld, rayToWorld, readInput, startSession, toWorld, type HeadFrame, type XRMode } from "./xr";
@@ -862,7 +862,9 @@ async function enter(mode: XRMode): Promise<void> {
     audio ??= new AudioContext();
     await begin(await startSession(mode, handSaved === "real"), mode);
   } catch (e) {
-    setStatus(`Could not start ${mode}: ${(e as Error).message}`);
+    const text = startErrorText(mode, e);
+    setStatus(text);
+    log("warn", text);
   }
 }
 $("enter-ar").addEventListener("click", () => void enter("immersive-ar"));
@@ -870,6 +872,7 @@ $("enter-vr").addEventListener("click", () => void enter("immersive-vr"));
 $("ui").addEventListener("click", (e) => { if (e.target === $("ui")) void enter("immersive-ar"); });
 addEventListener("resize", () => { renderer.setSize(innerWidth, innerHeight); camera.aspect = innerWidth / innerHeight; camera.updateProjectionMatrix(); });
 
+(window as unknown as { __handdesk?: boolean }).__handdesk = true;
 void (async () => {
   const xr = navigator.xr;
   if (!xr) {
@@ -885,7 +888,7 @@ void (async () => {
     // the browser's own Enter button, where the browser has it: opens straight into the session
     const offer = (xr as unknown as { offerSession?: (m: string, i: unknown) => Promise<XRSession> }).offerSession;
     if (ar && offer) {
-      void offer.call(xr, "immersive-ar", sessionInit("immersive-ar", handSaved === "real")).then((s) => begin(s, "immersive-ar")).catch(() => undefined);
+      void offer.call(xr, "immersive-ar", sessionInit("immersive-ar", handSaved === "real")).then((s) => begin(s, "immersive-ar")).catch((e) => { const text = startErrorText("immersive-ar", e); setStatus(text); log("warn", text); });
       setStatus("Press Enter AR, or the browser's Enter button.");
     } else if (ar) setStatus("Press Enter AR (or click anywhere on this page).");
   }

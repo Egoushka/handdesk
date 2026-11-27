@@ -28,6 +28,7 @@ run(KeyCodeTests.init, [
 run(TransportTests.init, [
     ("testHTTPParse", TransportTests.testHTTPParse),
     ("testHTTPIncompleteAndMalformed", TransportTests.testHTTPIncompleteAndMalformed),
+    ("testStaticRequestsAreNotLimitedBySessionCap", TransportTests.testStaticRequestsAreNotLimitedBySessionCap),
     ("testResponseHasContentLength", TransportTests.testResponseHasContentLength),
     ("testStaticResolveRejectsTraversal", TransportTests.testStaticResolveRejectsTraversal),
     ("testTokenAndOrigin", TransportTests.testTokenAndOrigin),

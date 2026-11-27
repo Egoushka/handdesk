@@ -87,10 +87,10 @@ final class Server {
         return ident
     }
 
-    static let maxSessions = 8
+    var upgradedCount: Int { sessions.values.filter { $0.isUpgraded }.count }
 
     private func accept(_ conn: NWConnection) {
-        if sessions.count >= Self.maxSessions { conn.cancel(); return }
+        if !Admission.acceptConnection(total: sessions.count) { conn.cancel(); return }
         let s = Session(connection: conn, server: self)
         sessions[ObjectIdentifier(s)] = s
         s.start()
@@ -294,6 +294,7 @@ final class Session {
     private unowned let server: Server
     private var buffer = Data()
     private var upgraded = false
+    var isUpgraded: Bool { upgraded }
     private var mapper: EventMapper?
     var subscribed: Set<Int> = []
     var subscribedWindows: [UInt32] = []
@@ -371,6 +372,10 @@ final class Session {
         }
         guard let resp = WebSocket.handshakeResponse(for: req) else {
             return send(HTTP.response(status: 400, reason: "Bad Request"), thenClose: true)
+        }
+        guard Admission.acceptUpgrade(upgraded: server.upgradedCount) else {
+            log.warn("rejected", ["why": "too many sessions"])
+            return send(HTTP.response(status: 503, reason: "Service Unavailable"), thenClose: true)
         }
         upgraded = true
         openedAt = Date()
